@@ -9,6 +9,7 @@ export interface InboundRow {
   isMasked: boolean;
   plannedMinutes: number;
   rpm: number; // Revenue Per Minute
+  maskedName?: string; // Manually entered masked name
 }
 
 export interface OutboundRow {
@@ -17,6 +18,7 @@ export interface OutboundRow {
   isMasked: boolean;
   plannedMinutes: number;
   cpm: number; // Cost Per Minute
+  maskedName?: string; // Manually entered masked name
 }
 
 export interface DealSummary {

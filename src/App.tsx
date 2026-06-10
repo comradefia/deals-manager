@@ -63,6 +63,14 @@ function maskDestination(val: string): string {
   }).join(" ");
 }
 
+// Custom manual OR automated fallback selector helper
+function getDisplayMaskedName(row: { destination: string; maskedName?: string }): string {
+  if (row.maskedName && row.maskedName.trim() !== "") {
+    return row.maskedName.trim();
+  }
+  return maskDestination(row.destination);
+}
+
 export default function App() {
   // State for rows
   const [inboundRows, setInboundRows] = useState<InboundRow[]>(INITIAL_INBOUND);
@@ -87,6 +95,10 @@ export default function App() {
   const [defaultRate, setDefaultRate] = useState<number>(0.030);
   const [isImporting, setIsImporting] = useState<boolean>(false);
   const [importSuccessMsg, setImportSuccessMsg] = useState<string | null>(null);
+
+  // NEW custom/manual masking states for imported spreadsheet values
+  const [unmaskedIndices, setUnmaskedIndices] = useState<number[]>([]);
+  const [customMaskedNames, setCustomMaskedNames] = useState<Record<number, string>>({});
 
   // Handle file select/drop
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -119,6 +131,8 @@ export default function App() {
     setImportSuccessMsg(null);
     setParsedDestinations([]);
     setFileName(file.name);
+    setUnmaskedIndices([]);
+    setCustomMaskedNames({});
 
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -182,29 +196,39 @@ export default function App() {
 
     setTimeout(() => {
       if (importTarget === "inbound") {
-        const newRows: InboundRow[] = parsedDestinations.map((dest) => ({
-          id: generateId(),
-          destination: dest,
-          isMasked: allInboundMasked,
-          plannedMinutes: defaultMinutes,
-          rpm: defaultRate
-        }));
+        const newRows: InboundRow[] = parsedDestinations.map((dest, idx) => {
+          const isUnmaskedSelected = unmaskedIndices.includes(idx);
+          return {
+            id: generateId(),
+            destination: dest,
+            isMasked: !isUnmaskedSelected,
+            plannedMinutes: defaultMinutes,
+            rpm: defaultRate,
+            maskedName: customMaskedNames[idx] || ""
+          };
+        });
         setInboundRows(prev => [...prev, ...newRows]);
       } else {
-        const newRows: OutboundRow[] = parsedDestinations.map((dest) => ({
-          id: generateId(),
-          destination: dest,
-          isMasked: allOutboundMasked,
-          plannedMinutes: defaultMinutes,
-          cpm: defaultRate
-        }));
+        const newRows: OutboundRow[] = parsedDestinations.map((dest, idx) => {
+          const isUnmaskedSelected = unmaskedIndices.includes(idx);
+          return {
+            id: generateId(),
+            destination: dest,
+            isMasked: !isUnmaskedSelected,
+            plannedMinutes: defaultMinutes,
+            cpm: defaultRate,
+            maskedName: customMaskedNames[idx] || ""
+          };
+        });
         setOutboundRows(prev => [...prev, ...newRows]);
       }
 
-      setImportSuccessMsg(`Successfully imported ${parsedDestinations.length} telecom trunks with customized planned parameters (${defaultMinutes.toLocaleString()} mins, $${defaultRate.toFixed(4)} rate)!`);
+      setImportSuccessMsg(`Successfully imported ${parsedDestinations.length} telecom trunks with customized planned parameters (${defaultMinutes.toLocaleString()} mins, $${defaultRate.toFixed(4)} rate)! Selected unmasked represents: ${unmaskedIndices.length} routes.`);
       // Reset state
       setParsedDestinations([]);
       setFileName("");
+      setUnmaskedIndices([]);
+      setCustomMaskedNames({});
       setIsImporting(false);
     }, 450);
   };
@@ -228,6 +252,8 @@ export default function App() {
     setParsedDestinations([]);
     setParsingError(null);
     setImportSuccessMsg(null);
+    setUnmaskedIndices([]);
+    setCustomMaskedNames({});
   };
 
   // Auto-align single-row masks if global toggle shifts
@@ -743,19 +769,90 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* Render destinations preview block */}
-                      <div>
-                        <span className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 font-mono">
-                          Discovered 'Original Destination' Values Preview
-                        </span>
-                        <div className="max-h-24 overflow-y-auto bg-white border border-slate-200 rounded-lg p-2.5 space-y-1.5 scrollbar-thin">
-                          {parsedDestinations.map((dest, i) => (
-                            <div key={i} className="flex items-center gap-1.5 text-xs text-slate-700">
-                              <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
-                              <span className="font-mono text-[10px] text-slate-400">Row {i + 1}</span>
-                              <span className="truncate">{dest}</span>
-                            </div>
-                          ))}
+                      {/* Render destinations preview block with custom selection & masking controllers */}
+                      <div className="space-y-2 border border-slate-200/60 bg-white/50 p-4 rounded-xl">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pb-2 border-b border-slate-150">
+                          <div>
+                            <span className="block text-xs font-bold text-slate-705 text-slate-700 uppercase tracking-widest font-mono">
+                              Configure Individual Route Masking Status
+                            </span>
+                            <span className="block text-[11px] text-slate-400 mt-0.5">
+                              Check an item to include it in the <strong className="text-emerald-600">Unmasked List</strong>. Leave unchecked to keep <strong className="text-amber-600">Masked</strong>.
+                            </span>
+                          </div>
+                          
+                          {/* Bulk Actions */}
+                          <div className="flex gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => setUnmaskedIndices(parsedDestinations.map((_, i) => i))}
+                              className="px-2.5 py-1 text-[10px] font-bold text-slate-600 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition-all cursor-pointer shadow-2xs"
+                            >
+                              Select All Unmasked
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setUnmaskedIndices([])}
+                              className="px-2.5 py-1 text-[10px] font-bold text-slate-600 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition-all cursor-pointer shadow-2xs"
+                            >
+                              Deselect (All Masked)
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="max-h-56 overflow-y-auto divide-y divide-slate-100 pr-1.5 scrollbar-thin">
+                          {parsedDestinations.map((dest, i) => {
+                            const isUnmasked = unmaskedIndices.includes(i);
+                            return (
+                              <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-2 text-xs">
+                                {/* Left side: Index, Checkbox and raw name */}
+                                <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                  <span className="font-mono text-[10px] text-slate-400 w-11 shrink-0">Row {i + 1}</span>
+                                  
+                                  <label className="flex items-center gap-2 cursor-pointer select-none min-w-0">
+                                    <input
+                                      type="checkbox"
+                                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5 cursor-pointer focus:outline-hidden"
+                                      checked={isUnmasked}
+                                      onChange={(e) => {
+                                        if (e.target.checked) {
+                                          setUnmaskedIndices(prev => [...prev, i]);
+                                        } else {
+                                          setUnmaskedIndices(prev => prev.filter(idx => idx !== i));
+                                        }
+                                      }}
+                                    />
+                                    <span className={`font-semibold truncate text-slate-750 transition-colors ${isUnmasked ? 'text-slate-900 font-bold' : 'text-slate-400 font-medium'}`} title={dest}>
+                                      {dest}
+                                    </span>
+                                  </label>
+                                </div>
+
+                                {/* Right side: Status and Manual Mask Input */}
+                                <div className="flex items-center gap-2 shrink-0 sm:w-72 justify-end">
+                                  {isUnmasked ? (
+                                    <span className="px-2 py-0.5 text-[9px] font-bold font-mono tracking-wider uppercase rounded bg-emerald-50 text-emerald-700 border border-emerald-150 shrink-0">
+                                      Unmasked
+                                    </span>
+                                  ) : (
+                                    <div className="flex items-center gap-1.5 w-full">
+                                      <span className="px-2 py-0.5 text-[9px] font-bold font-mono tracking-wider uppercase rounded bg-amber-50 text-amber-700 border border-amber-150 shrink-0">
+                                        Masked
+                                      </span>
+                                      <input
+                                        type="text"
+                                        value={customMaskedNames[i] || ""}
+                                        onChange={(e) => setCustomMaskedNames(prev => ({ ...prev, [i]: e.target.value }))}
+                                        placeholder={maskDestination(dest) || "Manual masked label..."}
+                                        className="w-full bg-slate-50 hover:bg-white focus:bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded px-2.5 py-0.5 text-[11px] font-mono transition-all text-slate-800 placeholder:text-slate-400 focus:outline-hidden"
+                                        title="Manually key in masked name"
+                                      />
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
 
@@ -911,10 +1008,23 @@ export default function App() {
                                     {row.isMasked ? <Lock size={12} className="text-emerald-500" /> : <Unlock size={12} />}
                                   </button>
                                 </div>
-                                {row.isMasked && row.destination && (
-                                  <span className="block text-[11px] font-mono text-emerald-600 pl-1.5 py-0.5 max-w-[240px] truncate" title="Masked presentation">
-                                    🕵🏽‍♂️ {maskDestination(row.destination)}
-                                  </span>
+                                {row.isMasked && (
+                                  <div className="mt-1 flex flex-col gap-1 pl-1">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-[10px] text-emerald-600 shrink-0 font-semibold font-mono">Masked Name:</span>
+                                      <input
+                                        type="text"
+                                        value={row.maskedName || ""}
+                                        onChange={(e) => updateInboundValue(row.id, "maskedName", e.target.value)}
+                                        placeholder={maskDestination(row.destination) || "Custom masked alias..."}
+                                        className="w-full bg-emerald-50/40 hover:bg-white focus:bg-white text-slate-750 focus:ring-1 focus:ring-emerald-500 rounded border border-emerald-100 px-2 py-0.5 text-[10px] font-mono transition-all focus:border-emerald-500 placeholder:text-slate-400 focus:outline-hidden"
+                                        title="Manually enter custom masked name"
+                                      />
+                                    </div>
+                                    <span className="block text-[9px] font-mono text-slate-450 pl-0.5" title="Final active representation">
+                                      Active view: <strong className="text-emerald-700 font-bold font-mono">{getDisplayMaskedName(row)}</strong>
+                                    </span>
+                                  </div>
                                 )}
                               </div>
                             </td>
@@ -1126,10 +1236,23 @@ export default function App() {
                                     {row.isMasked ? <Lock size={12} className="text-amber-500" /> : <Unlock size={12} />}
                                   </button>
                                 </div>
-                                {row.isMasked && row.destination && (
-                                  <span className="block text-[11px] font-mono text-amber-600 pl-1.5 py-0.5 max-w-[240px] truncate" title="Masked presentation">
-                                    🕵🏽‍♂️ {maskDestination(row.destination)}
-                                  </span>
+                                {row.isMasked && (
+                                  <div className="mt-1 flex flex-col gap-1 pl-1">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-[10px] text-amber-600 shrink-0 font-semibold font-mono">Masked Name:</span>
+                                      <input
+                                        type="text"
+                                        value={row.maskedName || ""}
+                                        onChange={(e) => updateOutboundValue(row.id, "maskedName", e.target.value)}
+                                        placeholder={maskDestination(row.destination) || "Custom masked alias..."}
+                                        className="w-full bg-amber-50/40 hover:bg-white focus:bg-white text-slate-755 focus:ring-1 focus:ring-amber-500 rounded border border-amber-100 px-2 py-0.5 text-[10px] font-mono transition-all focus:border-amber-500 placeholder:text-slate-400 focus:outline-hidden"
+                                        title="Manually enter custom masked name"
+                                      />
+                                    </div>
+                                    <span className="block text-[9px] font-mono text-slate-450 pl-0.5" title="Final active representation">
+                                      Active view: <strong className="text-amber-700 font-bold font-mono">{getDisplayMaskedName(row)}</strong>
+                                    </span>
+                                  </div>
                                 )}
                               </div>
                             </td>
@@ -1415,37 +1538,53 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Mask privacy setting toggle */}
-                <div className="flex items-center justify-between p-3.5 bg-slate-50 border border-slate-100 rounded-xl">
-                  <div>
-                    <span className="block text-sm font-semibold text-slate-800">
-                      Destination Obfuscation (Masking)
-                    </span>
-                    <span className="block text-xs text-slate-400">
-                      Hides raw location names via standard character masking rules
-                    </span>
+                 {/* Mask privacy setting toggle */}
+                <div className="flex flex-col gap-3.5 p-3.5 bg-slate-50 border border-slate-100 rounded-xl">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="block text-sm font-semibold text-slate-800">
+                        Destination Obfuscation (Masking)
+                      </span>
+                      <span className="block text-xs text-slate-400">
+                        Hides raw location names via standard character masking rules
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setEditingInbound({ ...editingInbound, isMasked: !editingInbound.isMasked })}
+                      className={`p-2 rounded-lg border flex items-center gap-1.5 text-xs font-semibold cursor-pointer ${
+                        editingInbound.isMasked 
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700' 
+                          : 'border-slate-200 bg-white text-slate-500'
+                      }`}
+                    >
+                      {editingInbound.isMasked ? (
+                        <>
+                          <Lock size={14} />
+                          Masked
+                        </>
+                      ) : (
+                        <>
+                          <Unlock size={14} />
+                          Raw Plaintext
+                        </>
+                      )}
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setEditingInbound({ ...editingInbound, isMasked: !editingInbound.isMasked })}
-                    className={`p-2 rounded-lg border flex items-center gap-1.5 text-xs font-semibold cursor-pointer ${
-                      editingInbound.isMasked 
-                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700' 
-                        : 'border-slate-200 bg-white text-slate-500'
-                    }`}
-                  >
-                    {editingInbound.isMasked ? (
-                      <>
-                        <Lock size={14} />
-                        Masked
-                      </>
-                    ) : (
-                      <>
-                        <Unlock size={14} />
-                        Raw Plaintext
-                      </>
-                    )}
-                  </button>
+                  {editingInbound.isMasked && (
+                    <div className="border-t border-slate-200/60 pt-3">
+                      <label className="block text-xs font-bold text-slate-650 uppercase tracking-wider mb-1.5">
+                        Manual Masked Destination Name (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        value={editingInbound.maskedName || ""}
+                        onChange={(e) => setEditingInbound({ ...editingInbound, maskedName: e.target.value })}
+                        className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-3 py-1.5 text-xs transition-all text-slate-850 placeholder:text-slate-400 focus:outline-hidden"
+                        placeholder={maskDestination(editingInbound.destination) || "Enter a custom masked alias..."}
+                      />
+                    </div>
+                  )}
                 </div>
 
                 {/* Calculation math helper readout */}
@@ -1573,36 +1712,52 @@ export default function App() {
                 </div>
 
                 {/* Mask privacy setting toggle */}
-                <div className="flex items-center justify-between p-3.5 bg-slate-50 border border-slate-100 rounded-xl">
-                  <div>
-                    <span className="block text-sm font-semibold text-slate-800">
-                      Destination Obfuscation (Masking)
-                    </span>
-                    <span className="block text-xs text-slate-400">
-                      Hides raw location names via character replacement rules
-                    </span>
+                <div className="flex flex-col gap-3.5 p-3.5 bg-slate-50 border border-slate-100 rounded-xl">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="block text-sm font-semibold text-slate-800">
+                        Destination Obfuscation (Masking)
+                      </span>
+                      <span className="block text-xs text-slate-400">
+                        Hides raw location names via character replacement rules
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setEditingOutbound({ ...editingOutbound, isMasked: !editingOutbound.isMasked })}
+                      className={`p-2 rounded-lg border flex items-center gap-1.5 text-xs font-semibold cursor-pointer ${
+                        editingOutbound.isMasked 
+                          ? 'border-amber-200 bg-amber-50 text-amber-700' 
+                          : 'border-slate-200 bg-white text-slate-500'
+                      }`}
+                    >
+                      {editingOutbound.isMasked ? (
+                        <>
+                          <Lock size={14} />
+                          Masked
+                        </>
+                      ) : (
+                        <>
+                          <Unlock size={14} />
+                          Raw Plaintext
+                        </>
+                      )}
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setEditingOutbound({ ...editingOutbound, isMasked: !editingOutbound.isMasked })}
-                    className={`p-2 rounded-lg border flex items-center gap-1.5 text-xs font-semibold cursor-pointer ${
-                      editingOutbound.isMasked 
-                        ? 'border-amber-200 bg-amber-50 text-amber-700' 
-                        : 'border-slate-200 bg-white text-slate-500'
-                    }`}
-                  >
-                    {editingOutbound.isMasked ? (
-                      <>
-                        <Lock size={14} />
-                        Masked
-                      </>
-                    ) : (
-                      <>
-                        <Unlock size={14} />
-                        Raw Plaintext
-                      </>
-                    )}
-                  </button>
+                  {editingOutbound.isMasked && (
+                    <div className="border-t border-slate-200/60 pt-3">
+                      <label className="block text-xs font-bold text-slate-650 uppercase tracking-wider mb-1.5">
+                        Manual Masked Destination Name (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        value={editingOutbound.maskedName || ""}
+                        onChange={(e) => setEditingOutbound({ ...editingOutbound, maskedName: e.target.value })}
+                        className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-3 py-1.5 text-xs transition-all text-slate-850 placeholder:text-slate-400 focus:outline-hidden"
+                        placeholder={maskDestination(editingOutbound.destination) || "Enter a custom masked alias..."}
+                      />
+                    </div>
+                  )}
                 </div>
 
                 {/* Calculation cost readout */}
