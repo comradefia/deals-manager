@@ -32,7 +32,8 @@ import {
   ListPlus,
   ArrowLeft,
   ArrowRight,
-  Search
+  Search,
+  Save
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { InboundRow, OutboundRow } from "./types";
@@ -483,7 +484,9 @@ export default function App() {
         return joined;
       });
       const namesJoined = newRows.map(r => `"${getDisplayMaskedName(r)}"`).join(", ");
-      setAddSuccessMsg(`Successfully added ${newRows.length} brand new Inbound destination(s): ${namesJoined} with Volume of ${addVolume.toLocaleString()} locked to masked view!`);
+      const msg = `Successfully added ${newRows.length} brand new Inbound destination(s): ${namesJoined} with Volume of ${addVolume.toLocaleString()} locked to masked view!`;
+      setAddSuccessMsg(msg);
+      setImportSuccessMsg(msg);
     } else {
       const newRows: OutboundRow[] = addSelectedDestinations.map(dest => ({
         id: generateId(),
@@ -511,13 +514,18 @@ export default function App() {
         return joined;
       });
       const namesJoined = newRows.map(r => `"${getDisplayMaskedName(r)}"`).join(", ");
-      setAddSuccessMsg(`Successfully added ${newRows.length} brand new Outbound destination(s): ${namesJoined} with Volume of ${addVolume.toLocaleString()} locked to masked view!`);
+      const msg = `Successfully added ${newRows.length} brand new Outbound destination(s): ${namesJoined} with Volume of ${addVolume.toLocaleString()} locked to masked view!`;
+      setAddSuccessMsg(msg);
+      setImportSuccessMsg(msg);
     }
 
     // Reset fields for the next entries
     setAddSelectedDestinations([]);
     setDestSearchQuery("");
     setAddMaskedName("");
+
+    // Automatically navigate back to dashboard
+    setActiveTab("tracker");
   };
 
   // Delete row targets
@@ -2113,7 +2121,7 @@ export default function App() {
                   type="submit"
                   className="px-5.5 py-2.5 text-xs font-bold text-white bg-indigo-650 hover:bg-indigo-700 rounded-xl shadow-xs transition-all hover:scale-[1.015] active:scale-[0.985] flex items-center gap-1.5 cursor-pointer"
                 >
-                  <Plus size={14} /> Save New Destination
+                  <Save size={14} /> SAVE and REFLECT
                 </button>
               </div>
 
