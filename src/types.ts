@@ -10,6 +10,7 @@ export interface InboundRow {
   plannedMinutes: number;
   rpm: number; // Revenue Per Minute
   maskedName?: string; // Manually entered masked name
+  isVolumeLocked?: boolean; // Lock volume to masked destination
 }
 
 export interface OutboundRow {
@@ -19,6 +20,7 @@ export interface OutboundRow {
   plannedMinutes: number;
   cpm: number; // Cost Per Minute
   maskedName?: string; // Manually entered masked name
+  isVolumeLocked?: boolean; // Lock volume to masked destination
 }
 
 export interface DealSummary {

@@ -29,7 +29,10 @@ import {
   FileCheck,
   AlertCircle,
   Info,
-  ListPlus
+  ListPlus,
+  ArrowLeft,
+  ArrowRight,
+  Search
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { InboundRow, OutboundRow } from "./types";
@@ -71,6 +74,85 @@ function getDisplayMaskedName(row: { destination: string; maskedName?: string })
   return maskDestination(row.destination);
 }
 
+// Synchronizes identical masked names across BOTH tables.
+function syncMinutesForMaskedName(
+  maskedName: string,
+  mins: number,
+  currentInbound: InboundRow[],
+  currentOutbound: OutboundRow[]
+): { inbound: InboundRow[]; outbound: OutboundRow[] } {
+  const targetMaskedLower = maskedName.trim().toLowerCase();
+  if (!targetMaskedLower) return { inbound: currentInbound, outbound: currentOutbound };
+
+  const updatedInbound = currentInbound.map(row => {
+    if (row.isMasked && getDisplayMaskedName(row).trim().toLowerCase() === targetMaskedLower) {
+      if (row.plannedMinutes !== mins) {
+        return { ...row, plannedMinutes: mins };
+      }
+    }
+    return row;
+  });
+
+  const updatedOutbound = currentOutbound.map(row => {
+    if (row.isMasked && getDisplayMaskedName(row).trim().toLowerCase() === targetMaskedLower) {
+      if (row.plannedMinutes !== mins) {
+        return { ...row, plannedMinutes: mins };
+      }
+    }
+    return row;
+  });
+
+  return { inbound: updatedInbound, outbound: updatedOutbound };
+}
+
+// Automatically matches and synchronizes all same-named masked volumes across BOTH tables.
+function alignAllMaskedVolumes(
+  inbound: InboundRow[],
+  outbound: OutboundRow[]
+): { inbound: InboundRow[]; outbound: OutboundRow[] } {
+  const nameToMins: Record<string, number> = {};
+
+  inbound.forEach(row => {
+    if (row.isMasked) {
+      const name = getDisplayMaskedName(row).trim().toLowerCase();
+      if (name && (nameToMins[name] === undefined || nameToMins[name] === 0)) {
+        nameToMins[name] = row.plannedMinutes;
+      }
+    }
+  });
+
+  outbound.forEach(row => {
+    if (row.isMasked) {
+      const name = getDisplayMaskedName(row).trim().toLowerCase();
+      if (name && nameToMins[name] === undefined) {
+        nameToMins[name] = row.plannedMinutes;
+      }
+    }
+  });
+
+  const alignedInbound = inbound.map(row => {
+    if (row.isMasked) {
+      const name = getDisplayMaskedName(row).trim().toLowerCase();
+      if (name && nameToMins[name] !== undefined && row.plannedMinutes !== nameToMins[name]) {
+        return { ...row, plannedMinutes: nameToMins[name] };
+      }
+    }
+    return row;
+  });
+
+  const alignedOutbound = outbound.map(row => {
+    if (row.isMasked) {
+      const name = getDisplayMaskedName(row).trim().toLowerCase();
+      if (name && nameToMins[name] !== undefined && row.plannedMinutes !== nameToMins[name]) {
+        return { ...row, plannedMinutes: nameToMins[name] };
+      }
+    }
+    return row;
+  });
+
+  return { inbound: alignedInbound, outbound: alignedOutbound };
+}
+
 export default function App() {
   // State for rows
   const [inboundRows, setInboundRows] = useState<InboundRow[]>(INITIAL_INBOUND);
@@ -79,6 +161,21 @@ export default function App() {
   // Modal Editing States
   const [editingInbound, setEditingInbound] = useState<InboundRow | null>(null);
   const [editingOutbound, setEditingOutbound] = useState<OutboundRow | null>(null);
+
+  // Navigation page routing states
+  const [activeTab, setActiveTab] = useState<"tracker" | "add-destination">("tracker");
+
+  // New Add Destination Form states
+  const [addDirection, setAddDirection] = useState<"inbound" | "outbound">("inbound");
+  const [addSelectedDestinations, setAddSelectedDestinations] = useState<string[]>([]);
+  const addDestination = addSelectedDestinations[0] || "";
+  const [destSearchQuery, setDestSearchQuery] = useState<string>("");
+  const [addMaskedName, setAddMaskedName] = useState<string>("");
+  const [addIsMasked, setAddIsMasked] = useState<boolean>(true);
+  const [addRate, setAddRate] = useState<number>(0.035);
+  const [addVolume, setAddVolume] = useState<number>(100000);
+  const [addIsVolumeLocked, setAddIsVolumeLocked] = useState<boolean>(true);
+  const [addSuccessMsg, setAddSuccessMsg] = useState<string | null>(null);
 
   // Broad state configurations
   const [allInboundMasked, setAllInboundMasked] = useState<boolean>(true);
@@ -99,6 +196,39 @@ export default function App() {
   // NEW custom/manual masking states for imported spreadsheet values
   const [unmaskedIndices, setUnmaskedIndices] = useState<number[]>([]);
   const [customMaskedNames, setCustomMaskedNames] = useState<Record<number, string>>({});
+
+  // Synchronized destination list compiled from active tracker routes and any spreadsheet currently being previewed/handled
+  const originalDestinationsList = useMemo(() => {
+    const list = new Set<string>();
+    
+    // Add destinations from current active tables
+    inboundRows.forEach(row => {
+      if (row.destination) {
+        list.add(row.destination.trim());
+      }
+    });
+    outboundRows.forEach(row => {
+      if (row.destination) {
+        list.add(row.destination.trim());
+      }
+    });
+
+    // Add parsed sheet destinations (if any are still loaded prior to import commitment)
+    parsedDestinations.forEach(dest => {
+      if (dest) {
+        list.add(dest.trim());
+      }
+    });
+
+    return Array.from(list).sort((a, b) => a.localeCompare(b));
+  }, [inboundRows, outboundRows, parsedDestinations]);
+
+  // Compute filtered list based on destSearchQuery
+  const filteredOriginalDestinations = useMemo(() => {
+    if (!destSearchQuery.trim()) return originalDestinationsList;
+    const q = destSearchQuery.toLowerCase();
+    return originalDestinationsList.filter(dest => dest.toLowerCase().includes(q));
+  }, [originalDestinationsList, destSearchQuery]);
 
   // Handle file select/drop
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -207,7 +337,12 @@ export default function App() {
             maskedName: customMaskedNames[idx] || ""
           };
         });
-        setInboundRows(prev => [...prev, ...newRows]);
+        setInboundRows(prev => {
+          const merged = [...prev, ...newRows];
+          const aligned = alignAllMaskedVolumes(merged, outboundRows);
+          setOutboundRows(aligned.outbound);
+          return aligned.inbound;
+        });
       } else {
         const newRows: OutboundRow[] = parsedDestinations.map((dest, idx) => {
           const isUnmaskedSelected = unmaskedIndices.includes(idx);
@@ -220,7 +355,12 @@ export default function App() {
             maskedName: customMaskedNames[idx] || ""
           };
         });
-        setOutboundRows(prev => [...prev, ...newRows]);
+        setOutboundRows(prev => {
+          const merged = [...prev, ...newRows];
+          const aligned = alignAllMaskedVolumes(inboundRows, merged);
+          setInboundRows(aligned.inbound);
+          return aligned.outbound;
+        });
       }
 
       setImportSuccessMsg(`Successfully imported ${parsedDestinations.length} telecom trunks with customized planned parameters (${defaultMinutes.toLocaleString()} mins, $${defaultRate.toFixed(4)} rate)! Selected unmasked represents: ${unmaskedIndices.length} routes.`);
@@ -260,40 +400,124 @@ export default function App() {
   const toggleAllInboundMask = () => {
     const nextState = !allInboundMasked;
     setAllInboundMasked(nextState);
-    setInboundRows(prev => prev.map(r => ({ ...r, isMasked: nextState })));
+    setInboundRows(prev => {
+      const nextRows = prev.map(r => ({ ...r, isMasked: nextState }));
+      if (nextState) {
+        const aligned = alignAllMaskedVolumes(nextRows, outboundRows);
+        setOutboundRows(aligned.outbound);
+        return aligned.inbound;
+      }
+      return nextRows;
+    });
   };
 
   const toggleAllOutboundMask = () => {
     const nextState = !allOutboundMasked;
     setAllOutboundMasked(nextState);
-    setOutboundRows(prev => prev.map(r => ({ ...r, isMasked: nextState })));
+    setOutboundRows(prev => {
+      const nextRows = prev.map(r => ({ ...r, isMasked: nextState }));
+      if (nextState) {
+        const aligned = alignAllMaskedVolumes(inboundRows, nextRows);
+        setInboundRows(aligned.inbound);
+        return aligned.outbound;
+      }
+      return nextRows;
+    });
   };
 
-  // Add empty or prefilled dynamic rows
+  // Add empty or prefilled dynamic rows via dedicated Add Destination Page
   const addInboundRow = () => {
-    const newRow: InboundRow = {
-      id: generateId(),
-      destination: `Voice Inbound Trunk (Prefix ${inboundRows.length + 1})`,
-      isMasked: allInboundMasked,
-      plannedMinutes: 100000,
-      rpm: 0.035
-    };
-    setInboundRows(prev => [...prev, newRow]);
-    // Immediately open edit modal for user convenience
-    setEditingInbound(newRow);
+    setAddDirection("inbound");
+    setAddSelectedDestinations([]);
+    setDestSearchQuery("");
+    setAddMaskedName("");
+    setAddIsMasked(true);
+    setAddRate(0.035);
+    setAddVolume(100000);
+    setAddIsVolumeLocked(true);
+    setAddSuccessMsg(null);
+    setActiveTab("add-destination");
   };
 
   const addOutboundRow = () => {
-    const newRow: OutboundRow = {
-      id: generateId(),
-      destination: `Voice Outbound Trunk (Prefix ${outboundRows.length + 1})`,
-      isMasked: allOutboundMasked,
-      plannedMinutes: 100000,
-      cpm: 0.025
-    };
-    setOutboundRows(prev => [...prev, newRow]);
-    // Immediately open edit modal for user convenience
-    setEditingOutbound(newRow);
+    setAddDirection("outbound");
+    setAddSelectedDestinations([]);
+    setDestSearchQuery("");
+    setAddMaskedName("");
+    setAddIsMasked(true);
+    setAddRate(0.025);
+    setAddVolume(100000);
+    setAddIsVolumeLocked(true);
+    setAddSuccessMsg(null);
+    setActiveTab("add-destination");
+  };
+
+  const handleSaveNewDestination = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (addSelectedDestinations.length === 0) return;
+
+    if (addDirection === "inbound") {
+      const newRows: InboundRow[] = addSelectedDestinations.map(dest => ({
+        id: generateId(),
+        destination: dest.trim(),
+        isMasked: addIsMasked,
+        plannedMinutes: addVolume,
+        rpm: addRate,
+        maskedName: addIsMasked ? addMaskedName.trim() : "",
+        isVolumeLocked: addIsVolumeLocked
+      }));
+      setInboundRows(prev => {
+        const joined = [...prev, ...newRows];
+        let currentOutbound = outboundRows;
+        let currentInbound = joined;
+        if (addIsMasked) {
+          newRows.forEach(row => {
+            const mName = getDisplayMaskedName(row);
+            const synced = syncMinutesForMaskedName(mName, addVolume, currentInbound, currentOutbound);
+            currentOutbound = synced.outbound;
+            currentInbound = synced.inbound;
+          });
+          setOutboundRows(currentOutbound);
+          return currentInbound;
+        }
+        return joined;
+      });
+      const namesJoined = newRows.map(r => `"${getDisplayMaskedName(r)}"`).join(", ");
+      setAddSuccessMsg(`Successfully added ${newRows.length} brand new Inbound destination(s): ${namesJoined} with Volume of ${addVolume.toLocaleString()} locked to masked view!`);
+    } else {
+      const newRows: OutboundRow[] = addSelectedDestinations.map(dest => ({
+        id: generateId(),
+        destination: dest.trim(),
+        isMasked: addIsMasked,
+        plannedMinutes: addVolume,
+        cpm: addRate,
+        maskedName: addIsMasked ? addMaskedName.trim() : "",
+        isVolumeLocked: addIsVolumeLocked
+      }));
+      setOutboundRows(prev => {
+        const joined = [...prev, ...newRows];
+        let currentInbound = inboundRows;
+        let currentOutbound = joined;
+        if (addIsMasked) {
+          newRows.forEach(row => {
+            const mName = getDisplayMaskedName(row);
+            const synced = syncMinutesForMaskedName(mName, addVolume, currentInbound, currentOutbound);
+            currentInbound = synced.inbound;
+            currentOutbound = synced.outbound;
+          });
+          setInboundRows(currentInbound);
+          return currentOutbound;
+        }
+        return joined;
+      });
+      const namesJoined = newRows.map(r => `"${getDisplayMaskedName(r)}"`).join(", ");
+      setAddSuccessMsg(`Successfully added ${newRows.length} brand new Outbound destination(s): ${namesJoined} with Volume of ${addVolume.toLocaleString()} locked to masked view!`);
+    }
+
+    // Reset fields for the next entries
+    setAddSelectedDestinations([]);
+    setDestSearchQuery("");
+    setAddMaskedName("");
   };
 
   // Delete row targets
@@ -309,39 +533,89 @@ export default function App() {
 
   // Inline inputs update handler
   const updateInboundValue = (id: string, field: keyof InboundRow, value: any) => {
-    setInboundRows(prev => prev.map(row => {
-      if (row.id === id) {
-        return { ...row, [field]: value };
+    setInboundRows(prevInbound => {
+      const updatedInbound = prevInbound.map(row => {
+        if (row.id === id) {
+          return { ...row, [field]: value };
+        }
+        return row;
+      });
+
+      if (field === "plannedMinutes") {
+        const targetRow = updatedInbound.find(r => r.id === id);
+        if (targetRow && targetRow.isMasked) {
+          const mName = getDisplayMaskedName(targetRow);
+          const synced = syncMinutesForMaskedName(mName, value, updatedInbound, outboundRows);
+          setOutboundRows(synced.outbound);
+          return synced.inbound;
+        }
       }
-      return row;
-    }));
+      return updatedInbound;
+    });
   };
 
   const updateOutboundValue = (id: string, field: keyof OutboundRow, value: any) => {
-    setOutboundRows(prev => prev.map(row => {
-      if (row.id === id) {
-        return { ...row, [field]: value };
+    setOutboundRows(prevOutbound => {
+      const updatedOutbound = prevOutbound.map(row => {
+        if (row.id === id) {
+          return { ...row, [field]: value };
+        }
+        return row;
+      });
+
+      if (field === "plannedMinutes") {
+        const targetRow = updatedOutbound.find(r => r.id === id);
+        if (targetRow && targetRow.isMasked) {
+          const mName = getDisplayMaskedName(targetRow);
+          const synced = syncMinutesForMaskedName(mName, value, inboundRows, updatedOutbound);
+          setInboundRows(synced.inbound);
+          return synced.outbound;
+        }
       }
-      return row;
-    }));
+      return updatedOutbound;
+    });
   };
 
   // Edit Modal form submits
   const handleSaveInboundEdit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingInbound) return;
-    setInboundRows(prev => prev.map(row => 
-      row.id === editingInbound.id ? editingInbound : row
-    ));
+
+    setInboundRows(prevInbound => {
+      const mainUpdatedInbound = prevInbound.map(row => 
+        row.id === editingInbound.id ? editingInbound : row
+      );
+
+      if (editingInbound.isMasked) {
+        const mName = getDisplayMaskedName(editingInbound);
+        const synced = syncMinutesForMaskedName(mName, editingInbound.plannedMinutes, mainUpdatedInbound, outboundRows);
+        setOutboundRows(synced.outbound);
+        return synced.inbound;
+      }
+      return mainUpdatedInbound;
+    });
+
     setEditingInbound(null);
   };
 
   const handleSaveOutboundEdit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingOutbound) return;
-    setOutboundRows(prev => prev.map(row => 
-      row.id === editingOutbound.id ? editingOutbound : row
-    ));
+
+    setOutboundRows(prevOutbound => {
+      const mainUpdatedOutbound = prevOutbound.map(row => 
+        row.id === editingOutbound.id ? editingOutbound : row
+      );
+
+      if (editingOutbound.isMasked) {
+        const mName = getDisplayMaskedName(editingOutbound);
+        const synced = syncMinutesForMaskedName(mName, editingOutbound.plannedMinutes, inboundRows, mainUpdatedOutbound);
+        setInboundRows(synced.inbound);
+        return synced.outbound;
+      }
+      return mainUpdatedOutbound;
+    });
+
     setEditingOutbound(null);
   };
 
@@ -464,8 +738,36 @@ export default function App() {
           </div>
         </header>
 
-        {/* Dynamic Formula Panel */}
-        <AnimatePresence>
+        {/* Navigation Tabs */}
+        <div className="flex border-b border-slate-200 mb-8 sm:gap-2 overflow-x-auto scrollbar-none" id="main-navigation-tabs">
+          <button
+            onClick={() => setActiveTab("tracker")}
+            className={`px-4 py-2.5 text-sm font-bold flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
+              activeTab === "tracker"
+                ? "border-indigo-600 text-indigo-650 font-extrabold"
+                : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300"
+            }`}
+          >
+            <Coins size={16} />
+            Bilateral Swaps Dashboard
+          </button>
+          <button
+            onClick={() => setActiveTab("add-destination")}
+            className={`px-4 py-2.5 text-sm font-bold flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
+              activeTab === "add-destination"
+                ? "border-indigo-600 text-indigo-650 font-extrabold"
+                : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300"
+            }`}
+          >
+            <Plus size={16} className="text-indigo-500 animate-pulse" />
+            Add Destination Page
+          </button>
+        </div>
+
+        {activeTab === "tracker" && (
+          <>
+            {/* Dynamic Formula Panel */}
+            <AnimatePresence>
           {showInstructions && (
             <motion.div
               initial={{ height: 0, opacity: 0 }}
@@ -989,68 +1291,60 @@ export default function App() {
 
                             {/* Destination Input (Clearly demarcated form fields) */}
                             <td className="py-2 px-2">
-                              <div className="flex flex-col gap-1">
-                                <div className="flex items-center gap-1">
-                                  {row.isMasked ? (
-                                    <input
-                                      type="text"
-                                      value={row.maskedName || ""}
-                                      onChange={(e) => updateInboundValue(row.id, "maskedName", e.target.value)}
-                                      placeholder={maskDestination(row.destination) || "Enter custom masked alias..."}
-                                      className="w-full bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-emerald-500 rounded border border-slate-200 hover:border-slate-300 px-2.5 py-1 text-xs transition-all focus:border-emerald-500 font-medium placeholder:text-slate-400 focus:outline-hidden"
-                                      title="Edit Manual Masked Destination Name (Optional)"
-                                    />
-                                  ) : (
-                                    <input
-                                      type="text"
-                                      value={row.destination}
-                                      onChange={(e) => updateInboundValue(row.id, "destination", e.target.value)}
-                                      placeholder="Destination location..."
-                                      className="w-full bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-emerald-500 rounded border border-slate-200 hover:border-slate-300 px-2.5 py-1 text-xs transition-all focus:border-emerald-500 font-medium placeholder:text-slate-300 focus:outline-hidden"
-                                      title="Edit destination location"
-                                    />
-                                  )}
-                                  <button
-                                    type="button"
-                                    onClick={() => updateInboundValue(row.id, "isMasked", !row.isMasked)}
-                                    title={row.isMasked ? "Click to Reveal Raw" : "Click to Mask Value"}
-                                    className="p-1 px-1.5 text-slate-400 hover:text-slate-600 rounded border border-slate-200 bg-white hover:bg-slate-50 shrink-0 transition-all cursor-pointer"
-                                  >
-                                    {row.isMasked ? <Lock size={12} className="text-emerald-500" /> : <Unlock size={12} />}
-                                  </button>
-                                </div>
-                                {row.isMasked && (
-                                  <div className="mt-1 flex flex-col gap-1 pl-1">
-                                    <div className="flex items-center gap-1.5">
-                                      <span className="text-[10px] text-emerald-600 shrink-0 font-semibold font-mono">Original:</span>
-                                      <input
-                                        type="text"
-                                        value={row.destination}
-                                        onChange={(e) => updateInboundValue(row.id, "destination", e.target.value)}
-                                        placeholder="Destination Name / Prefix..."
-                                        className="w-full bg-emerald-50/40 hover:bg-white focus:bg-white text-slate-750 focus:ring-1 focus:ring-emerald-500 rounded border border-emerald-100 px-2 py-0.5 text-[10px] font-mono transition-all focus:border-emerald-500 placeholder:text-slate-400 focus:outline-hidden"
-                                        title="Edit raw destination"
-                                      />
-                                    </div>
-                                    <span className="block text-[9px] font-mono text-slate-450 pl-0.5" title="Final active representation">
-                                      Active view: <strong className="text-emerald-700 font-bold font-mono">{getDisplayMaskedName(row)}</strong>
-                                    </span>
-                                  </div>
+                              <div className="flex items-center gap-1 animate-fade-in">
+                                {row.isMasked ? (
+                                  <input
+                                    type="text"
+                                    value={row.maskedName || ""}
+                                    onChange={(e) => updateInboundValue(row.id, "maskedName", e.target.value)}
+                                    placeholder={maskDestination(row.destination) || "Enter custom masked alias..."}
+                                    className="w-full bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-emerald-500 rounded border border-slate-200 hover:border-slate-300 px-2.5 py-1 text-xs transition-all focus:border-emerald-500 font-medium placeholder:text-slate-400 focus:outline-hidden"
+                                    title="Edit Manual Masked Destination Name (Optional)"
+                                  />
+                                ) : (
+                                  <input
+                                    type="text"
+                                    value={row.destination}
+                                    onChange={(e) => updateInboundValue(row.id, "destination", e.target.value)}
+                                    placeholder="Destination location..."
+                                    className="w-full bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-emerald-500 rounded border border-slate-200 hover:border-slate-300 px-2.5 py-1 text-xs transition-all focus:border-emerald-500 font-medium placeholder:text-slate-300 focus:outline-hidden"
+                                    title="Edit destination location"
+                                  />
                                 )}
+                                <button
+                                  type="button"
+                                  onClick={() => updateInboundValue(row.id, "isMasked", !row.isMasked)}
+                                  title={row.isMasked ? "Click to Reveal Raw" : "Click to Mask Value"}
+                                  className="p-1 px-1.5 text-slate-400 hover:text-slate-600 rounded border border-slate-200 bg-white hover:bg-slate-50 shrink-0 transition-all cursor-pointer"
+                                >
+                                  {row.isMasked ? <Lock size={12} className="text-emerald-500" /> : <Unlock size={12} />}
+                                </button>
                               </div>
                             </td>
 
                             {/* Planned Minutes Input */}
                             <td className="py-2 px-2">
-                              <input
-                                type="number"
-                                min="0"
-                                value={row.plannedMinutes === 0 ? "" : row.plannedMinutes}
-                                onChange={(e) => updateInboundValue(row.id, "plannedMinutes", Math.max(0, parseInt(e.target.value) || 0))}
-                                placeholder="0"
-                                className="w-full font-mono text-xs text-right bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-emerald-500 rounded border border-slate-200 hover:border-slate-300 px-2 py-1 transition-all focus:border-emerald-500 focus:outline-hidden"
-                                title="Edit Planned Minutes"
-                              />
+                              <div className="relative flex items-center justify-end">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  disabled={row.isVolumeLocked}
+                                  value={row.plannedMinutes === 0 ? "" : row.plannedMinutes}
+                                  onChange={(e) => updateInboundValue(row.id, "plannedMinutes", Math.max(0, parseInt(e.target.value) || 0))}
+                                  placeholder="0"
+                                  className={`w-full font-mono text-xs text-right pr-6 pl-2 py-1 rounded transition-all focus:outline-hidden ${
+                                    row.isVolumeLocked
+                                      ? "bg-slate-100/80 text-slate-400 border border-slate-250 cursor-not-allowed font-semibold"
+                                      : "bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-emerald-500 border border-slate-200 hover:border-slate-300 focus:border-emerald-500"
+                                  }`}
+                                  title={row.isVolumeLocked ? "Volume is locked to this masked destination" : "Edit Planned Minutes"}
+                                />
+                                {row.isVolumeLocked && (
+                                  <span className="absolute right-1.5 text-amber-500" title="Locked to Masked Destination">
+                                    <Lock size={10} className="animate-pulse" />
+                                  </span>
+                                )}
+                              </div>
                             </td>
 
                             {/* RPM Input (Rate Per Minute) */}
@@ -1228,68 +1522,60 @@ export default function App() {
 
                             {/* Destination Input (Clearly demarcated form fields) */}
                             <td className="py-2 px-2">
-                              <div className="flex flex-col gap-1">
-                                <div className="flex items-center gap-1">
-                                  {row.isMasked ? (
-                                    <input
-                                      type="text"
-                                      value={row.maskedName || ""}
-                                      onChange={(e) => updateOutboundValue(row.id, "maskedName", e.target.value)}
-                                      placeholder={maskDestination(row.destination) || "Enter custom masked alias..."}
-                                      className="w-full bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-amber-500 rounded border border-slate-200 hover:border-slate-300 px-2.5 py-1 text-xs transition-all focus:border-amber-500 font-medium placeholder:text-slate-400 focus:outline-hidden"
-                                      title="Edit Manual Masked Destination Name (Optional)"
-                                    />
-                                  ) : (
-                                    <input
-                                      type="text"
-                                      value={row.destination}
-                                      onChange={(e) => updateOutboundValue(row.id, "destination", e.target.value)}
-                                      placeholder="Destination location..."
-                                      className="w-full bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-amber-500 rounded border border-slate-200 hover:border-slate-300 px-2.5 py-1 text-xs transition-all focus:border-amber-500 font-medium placeholder:text-slate-300 focus:outline-hidden"
-                                      title="Edit destination location"
-                                    />
-                                  )}
-                                  <button
-                                    type="button"
-                                    onClick={() => updateOutboundValue(row.id, "isMasked", !row.isMasked)}
-                                    title={row.isMasked ? "Click to Reveal Raw" : "Click to Mask Value"}
-                                    className="p-1 px-1.5 text-slate-400 hover:text-slate-600 rounded border border-slate-200 bg-white hover:bg-slate-50 shrink-0 transition-all cursor-pointer"
-                                  >
-                                    {row.isMasked ? <Lock size={12} className="text-amber-500" /> : <Unlock size={12} />}
-                                  </button>
-                                </div>
-                                {row.isMasked && (
-                                  <div className="mt-1 flex flex-col gap-1 pl-1">
-                                    <div className="flex items-center gap-1.5">
-                                      <span className="text-[10px] text-amber-600 shrink-0 font-semibold font-mono">Original:</span>
-                                      <input
-                                        type="text"
-                                        value={row.destination}
-                                        onChange={(e) => updateOutboundValue(row.id, "destination", e.target.value)}
-                                        placeholder="Destination Name / Prefix..."
-                                        className="w-full bg-amber-50/40 hover:bg-white focus:bg-white text-slate-755 focus:ring-1 focus:ring-amber-500 rounded border border-amber-100 px-2 py-0.5 text-[10px] font-mono transition-all focus:border-amber-500 placeholder:text-slate-400 focus:outline-hidden"
-                                        title="Edit raw destination"
-                                      />
-                                    </div>
-                                    <span className="block text-[9px] font-mono text-slate-450 pl-0.5" title="Final active representation">
-                                      Active view: <strong className="text-amber-700 font-bold font-mono">{getDisplayMaskedName(row)}</strong>
-                                    </span>
-                                  </div>
+                              <div className="flex items-center gap-1 animate-fade-in">
+                                {row.isMasked ? (
+                                  <input
+                                    type="text"
+                                    value={row.maskedName || ""}
+                                    onChange={(e) => updateOutboundValue(row.id, "maskedName", e.target.value)}
+                                    placeholder={maskDestination(row.destination) || "Enter custom masked alias..."}
+                                    className="w-full bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-amber-500 rounded border border-slate-200 hover:border-slate-300 px-2.5 py-1 text-xs transition-all focus:border-amber-500 font-medium placeholder:text-slate-400 focus:outline-hidden"
+                                    title="Edit Manual Masked Destination Name (Optional)"
+                                  />
+                                ) : (
+                                  <input
+                                    type="text"
+                                    value={row.destination}
+                                    onChange={(e) => updateOutboundValue(row.id, "destination", e.target.value)}
+                                    placeholder="Destination location..."
+                                    className="w-full bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-amber-500 rounded border border-slate-200 hover:border-slate-300 px-2.5 py-1 text-xs transition-all focus:border-amber-500 font-medium placeholder:text-slate-300 focus:outline-hidden"
+                                    title="Edit destination location"
+                                  />
                                 )}
+                                <button
+                                  type="button"
+                                  onClick={() => updateOutboundValue(row.id, "isMasked", !row.isMasked)}
+                                  title={row.isMasked ? "Click to Reveal Raw" : "Click to Mask Value"}
+                                  className="p-1 px-1.5 text-slate-400 hover:text-slate-600 rounded border border-slate-200 bg-white hover:bg-slate-50 shrink-0 transition-all cursor-pointer"
+                                >
+                                  {row.isMasked ? <Lock size={12} className="text-amber-500" /> : <Unlock size={12} />}
+                                </button>
                               </div>
                             </td>
 
                             {/* Planned Minutes Input */}
                             <td className="py-2 px-2">
-                              <input
-                                type="number"
-                                min="0"
-                                value={row.plannedMinutes === 0 ? "" : row.plannedMinutes}
-                                onChange={(e) => updateOutboundValue(row.id, "plannedMinutes", Math.max(0, parseInt(e.target.value) || 0))}
-                                placeholder="0"
-                                className="w-full font-mono text-xs text-right bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-amber-500 rounded border border-slate-200 hover:border-slate-300 px-2 py-1 transition-all focus:border-amber-500 focus:outline-hidden"
-                                title="Edit Planned Minutes"
-                              />
+                              <div className="relative flex items-center justify-end">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  disabled={row.isVolumeLocked}
+                                  value={row.plannedMinutes === 0 ? "" : row.plannedMinutes}
+                                  onChange={(e) => updateOutboundValue(row.id, "plannedMinutes", Math.max(0, parseInt(e.target.value) || 0))}
+                                  placeholder="0"
+                                  className={`w-full font-mono text-xs text-right pr-6 pl-2 py-1 rounded transition-all focus:outline-hidden ${
+                                    row.isVolumeLocked
+                                      ? "bg-slate-100/80 text-slate-400 border border-slate-250 cursor-not-allowed font-semibold"
+                                      : "bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-amber-500 border border-slate-200 hover:border-slate-300 focus:border-amber-500"
+                                  }`}
+                                  title={row.isVolumeLocked ? "Volume is locked to this masked destination" : "Edit Planned Minutes"}
+                                />
+                                {row.isVolumeLocked && (
+                                  <span className="absolute right-1.5 text-amber-550 text-amber-500" title="Locked to Masked Destination">
+                                    <Lock size={10} className="animate-pulse" />
+                                  </span>
+                                )}
+                              </div>
                             </td>
 
                             {/* Cost Input (CPM Rate) */}
@@ -1464,6 +1750,473 @@ export default function App() {
 
           </div>
         </section>
+      </>
+    )}
+
+    {activeTab === "add-destination" && (
+      <motion.div
+        initial={{ opacity: 0, y: 15 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: 15 }}
+        className="space-y-6"
+        id="add-destination-page"
+      >
+        {/* Page Top Header Bar */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-slate-200 shadow-3xs">
+          <div className="flex items-center gap-3">
+            <span className="p-3 bg-indigo-50 text-indigo-650 rounded-xl inline-flex animate-bounce">
+              <Plus size={22} className="text-indigo-600" />
+            </span>
+            <div>
+              <h2 className="text-xl font-bold text-slate-900 tracking-tight">Create & Set New Swap Destination</h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Configure a brand new voice swap destination with custom masking rules, targeted traffic volumes, and active pricing.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setActiveTab("tracker")}
+            className="px-4 py-2 text-xs font-bold text-slate-650 hover:text-slate-900 bg-white border border-slate-200 hover:border-slate-300 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs self-start md:self-auto"
+          >
+            <ArrowLeft size={13} /> Back to Dashboard
+          </button>
+        </div>
+
+        {/* Form & Real-time Helper Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          
+          {/* Main Input Form */}
+          <div className="lg:col-span-2 space-y-6">
+            
+            {/* success status feed alert */}
+            {addSuccessMsg && (
+              <motion.div
+                initial={{ opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="p-4 bg-emerald-50 border border-emerald-250 rounded-xl text-emerald-805 text-sm flex flex-col gap-2.5 shadow-xs"
+              >
+                <div className="flex items-start gap-2.5">
+                  <span className="p-1 bg-emerald-100 text-emerald-700 rounded-full shrink-0 mt-0.5 inline-flex">
+                    <Check size={13} className="stroke-[3]" />
+                  </span>
+                  <div>
+                    <span className="font-bold block text-emerald-900">Destination generated successfully!</span>
+                    <span className="text-xs text-emerald-850 block mt-0.5">{addSuccessMsg}</span>
+                  </div>
+                </div>
+                <div className="flex gap-2 border-t border-emerald-100/70 pt-2.5 mt-0.5 text-xs font-semibold">
+                  <button
+                    onClick={() => setActiveTab("tracker")}
+                    className="text-emerald-700 hover:text-emerald-900 transition-colors cursor-pointer flex items-center gap-1"
+                  >
+                    Go to Spreadsheet Grid <ArrowRight size={12} />
+                  </button>
+                  <span className="text-emerald-300">|</span>
+                  <button
+                    onClick={() => setAddSuccessMsg(null)}
+                    className="text-emerald-600 hover:text-emerald-800 transition-colors cursor-pointer"
+                  >
+                    Add another destination
+                  </button>
+                </div>
+              </motion.div>
+            )}
+
+            <form onSubmit={handleSaveNewDestination} className="bg-white rounded-2xl border border-slate-200 shadow-md p-6 space-y-6">
+              
+              {/* Traffic Corridor Selector */}
+              <div>
+                <label className="block text-[11px] font-mono font-bold text-slate-450 uppercase tracking-wider mb-2.5">
+                  Swap Stream Corridor Direction
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Inbound Button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAddDirection("inbound");
+                    }}
+                    className={`p-4 rounded-xl border-2 text-left transition-all cursor-pointer flex gap-4 ${
+                      addDirection === "inbound"
+                        ? "border-emerald-500 bg-emerald-50/45 text-emerald-950 shadow-2xs"
+                        : "border-slate-100 bg-slate-50 hover:bg-slate-100 text-slate-500"
+                    }`}
+                  >
+                    <div className={`p-2 rounded-lg shrink-0 inline-flex items-center justify-center ${
+                      addDirection === "inbound" ? "bg-emerald-500 text-white" : "bg-slate-200 text-slate-500"
+                    }`}>
+                      <ArrowDownLeft size={16} />
+                    </div>
+                    <div>
+                      <span className="block font-bold text-xs uppercase tracking-wider">Inbound Swap</span>
+                      <span className="block text-[11px] text-slate-400 mt-0.5 leading-tight">
+                        Earn wholesale termination revenue from counterparts
+                      </span>
+                    </div>
+                  </button>
+
+                  {/* Outbound Button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAddDirection("outbound");
+                    }}
+                    className={`p-4 rounded-xl border-2 text-left transition-all cursor-pointer flex gap-4 ${
+                      addDirection === "outbound"
+                        ? "border-amber-500 bg-amber-50/45 text-amber-950 shadow-2xs"
+                        : "border-slate-100 bg-slate-50 hover:bg-slate-100 text-slate-500"
+                    }`}
+                  >
+                    <div className={`p-2 rounded-lg shrink-0 inline-flex items-center justify-center ${
+                      addDirection === "outbound" ? "bg-amber-500 text-white" : "bg-slate-200 text-slate-500"
+                    }`}>
+                      <ArrowUpRight size={16} />
+                    </div>
+                    <div>
+                      <span className="block font-bold text-xs uppercase tracking-wider">Outbound Swap</span>
+                      <span className="block text-[11px] text-slate-400 mt-0.5 leading-tight">
+                        Incur transit origination charges or carrier costs
+                      </span>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* Destination Name Parameters */}
+              <div className="space-y-4 pt-2">
+                <h3 className="text-[11px] font-semibold text-slate-450 uppercase tracking-widest border-b border-slate-100 pb-2">
+                  Destination Configurations
+                </h3>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Destination Name Prefix */}
+                  <div className="flex flex-col gap-1">
+                    <label className="block text-xs font-bold text-slate-650 mb-0.5">
+                      Original Destination Name / Prefix <span className="text-rose-500">*</span>
+                    </label>
+                    
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-slate-700">
+                          Selected: <span className="text-indigo-650 font-mono font-bold bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">{addSelectedDestinations.length}</span> destinations
+                        </span>
+                        <div className="flex gap-2 text-[10px] font-bold">
+                          <button
+                            type="button"
+                            onClick={() => setAddSelectedDestinations(originalDestinationsList)}
+                            className="text-indigo-650 hover:text-indigo-805 transition-colors cursor-pointer"
+                          >
+                            Select All
+                          </button>
+                          <span className="text-slate-300">|</span>
+                          <button
+                            type="button"
+                            onClick={() => setAddSelectedDestinations([])}
+                            className="text-rose-600 hover:text-rose-800 transition-colors cursor-pointer"
+                          >
+                            Clear Selection
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Search Field */}
+                      <div className="relative">
+                        <input
+                          type="text"
+                          placeholder="Search uploaded list..."
+                          value={destSearchQuery}
+                          onChange={(e) => setDestSearchQuery(e.target.value)}
+                          className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg pl-8 pr-3 py-1.5 text-xs font-medium placeholder:text-slate-400 focus:outline-hidden"
+                        />
+                        <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                        {destSearchQuery && (
+                          <button
+                            type="button"
+                            onClick={() => setDestSearchQuery("")}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-450 hover:text-slate-700 text-xs font-bold"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Checkbox List scroll panel */}
+                      <div className="max-h-48 overflow-y-auto border border-slate-150 rounded-lg bg-white p-2.5 space-y-1.5 custom-scrollbar">
+                        {filteredOriginalDestinations.length === 0 ? (
+                          <div className="text-center py-6 text-xs text-slate-400 font-medium font-mono">
+                            No matching unmasked route destinations found.
+                          </div>
+                        ) : (
+                          filteredOriginalDestinations.map((dest) => {
+                            const isChecked = addSelectedDestinations.includes(dest);
+                            return (
+                              <label
+                                key={dest}
+                                className={`flex items-start gap-2.5 p-2 rounded-md hover:bg-slate-50 transition-colors cursor-pointer select-none border ${
+                                  isChecked ? "bg-indigo-50/35 border-indigo-100/60" : "border-transparent"
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => {
+                                    if (isChecked) {
+                                      setAddSelectedDestinations(prev => prev.filter(d => d !== dest));
+                                    } else {
+                                      setAddSelectedDestinations(prev => [...prev, dest]);
+                                    }
+                                  }}
+                                  className="mt-0.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5 cursor-pointer"
+                                />
+                                <div className="flex flex-col">
+                                  <span className="text-xs font-semibold text-slate-850 leading-tight">
+                                    {dest}
+                                  </span>
+                                  {addIsMasked && (
+                                    <span className="text-[9px] text-indigo-600 font-mono mt-0.5">
+                                      → Maps to: <strong className="font-bold">{addMaskedName ? addMaskedName : maskDestination(dest)}</strong>
+                                    </span>
+                                  )}
+                                </div>
+                              </label>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Manual Masked Name */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-650 mb-1.5">
+                      Manual Masked Destination Name (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={addMaskedName}
+                      onChange={(e) => setAddMaskedName(e.target.value)}
+                      className="w-full bg-slate-50 focus:bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-xl px-3.5 py-2.5 text-xs transition-all text-slate-850 placeholder:text-slate-400 focus:outline-hidden font-medium font-mono"
+                      placeholder={addDestination ? maskDestination(addDestination) : "Leave empty for auto-mask alias..."}
+                    />
+                    <p className="text-[10px] text-slate-400 mt-1.5 leading-none">
+                      Custom name obfuscation. If ignored, the automatic hashing logic will take place.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Mask privacy toggle */}
+                <div className="flex items-center justify-between p-3.5 bg-slate-50 border border-slate-150 rounded-xl mt-2">
+                  <div>
+                    <span className="block text-xs font-bold text-slate-705">Enable Obfuscated Masking on Creation</span>
+                    <span className="block text-[11px] text-slate-400 mt-0.5">
+                      Ensures raw prefix details are safely obscured during public dashboards reviews.
+                    </span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={addIsMasked}
+                    onChange={(e) => setAddIsMasked(e.target.checked)}
+                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 h-4.5 w-4.5 cursor-pointer focus:outline-hidden"
+                  />
+                </div>
+              </div>
+
+              {/* Volume Commitment & Pricing Rates */}
+              <div className="space-y-4 pt-1">
+                <h3 className="text-[11px] font-semibold text-slate-450 uppercase tracking-widest border-b border-slate-100 pb-2">
+                  Traffic Volumes and pricing
+                </h3>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Pricing Rate (RPM/CPM) */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-650 mb-1.5">
+                      {addDirection === "inbound" ? "Revenue Per Minute Rate (RPM)" : "Cost Per Minute Rate (CPM)"} <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs text-slate-450 font-mono font-bold">$</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.0001"
+                        required
+                        value={addRate === 0 ? "" : addRate}
+                        onChange={(e) => setAddRate(Math.max(0, parseFloat(e.target.value) || 0))}
+                        className="w-full font-mono bg-slate-50 focus:bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-xl pl-8 pr-3 py-2.5 text-xs transition-all text-slate-850"
+                        placeholder="0.0000"
+                      />
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-1.5 leading-none">
+                      Tariff billing pricing per traffic minute logged.
+                    </p>
+                  </div>
+
+                  {/* Volume allocation */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-650 mb-1.5">
+                      Committed Volume (Planned Minutes) <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      required
+                      value={addVolume === 0 ? "" : addVolume}
+                      onChange={(e) => setAddVolume(Math.max(0, parseInt(e.target.value) || 0))}
+                      className="w-full font-mono bg-slate-50 focus:bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-xl px-3.5 py-2.5 text-xs transition-all text-slate-850"
+                      placeholder="0"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-1.5 leading-none">
+                      Estimated or guaranteed capacity target for bilateral balance.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Locked Volume Setup */}
+                <div className="flex items-center justify-between p-3.5 bg-amber-50/20 border border-amber-200/50 rounded-xl mt-2">
+                  <div className="flex gap-2">
+                    <Lock size={15} className="text-amber-500 mt-0.5 animate-pulse shrink-0" />
+                    <div>
+                      <span className="block text-xs font-bold text-amber-950">Lock Volume to the Masked Destination</span>
+                      <span className="block text-[11px] text-slate-600 mt-0.5 leading-relaxed">
+                        Protects the planned minutes capacity. Direct editing within spreadsheet cells will be completely disabled.
+                      </span>
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={addIsVolumeLocked}
+                    onChange={(e) => setAddIsVolumeLocked(e.target.checked)}
+                    className="rounded border-slate-350 text-amber-600 focus:ring-amber-500 h-4.5 w-4.5 cursor-pointer focus:outline-hidden"
+                  />
+                </div>
+              </div>
+
+              {/* Action operations and clear triggers */}
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddSelectedDestinations([]);
+                    setDestSearchQuery("");
+                    setAddMaskedName("");
+                    setAddIsMasked(true);
+                    setAddRate(addDirection === "inbound" ? 0.035 : 0.025);
+                    setAddVolume(100000);
+                    setAddIsVolumeLocked(true);
+                    setAddSuccessMsg(null);
+                  }}
+                  className="px-4.5 py-2.5 text-xs font-bold text-slate-500 hover:text-slate-850 bg-white hover:bg-slate-50 rounded-xl border border-slate-200 hover:border-slate-300 transition-all cursor-pointer"
+                >
+                  Clear Fields
+                </button>
+                <button
+                  type="submit"
+                  className="px-5.5 py-2.5 text-xs font-bold text-white bg-indigo-650 hover:bg-indigo-700 rounded-xl shadow-xs transition-all hover:scale-[1.015] active:scale-[0.985] flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Plus size={14} /> Save New Destination
+                </button>
+              </div>
+
+            </form>
+          </div>
+
+          {/* Right Column: Calculations Side-view Panel */}
+          <div className="space-y-6">
+            <div className="bg-slate-900 text-slate-100 p-6 rounded-2xl border border-slate-800 shadow-xl space-y-4">
+              <div className="flex items-center gap-2 text-indigo-400">
+                <Sparkles size={14} className="animate-spin" />
+                <span className="text-[10px] uppercase font-mono tracking-widest font-bold">Real-time Calculation Sandbox</span>
+              </div>
+              
+              <div className="border-b border-slate-800 pb-3">
+                <span className="text-[10px] text-slate-405 block uppercase tracking-wider font-semibold">Active Destination View Mapping</span>
+                {addSelectedDestinations.length === 0 ? (
+                  <strong className="text-sm font-mono tracking-tight text-slate-400 block mt-1">
+                    (Awaiting destination selections...)
+                  </strong>
+                ) : addSelectedDestinations.length === 1 ? (
+                  <>
+                    <strong className="text-md font-mono tracking-tight text-white block mt-1 break-all">
+                      {getDisplayMaskedName({ 
+                        destination: addSelectedDestinations[0], 
+                        isMasked: addIsMasked, 
+                        maskedName: addMaskedName 
+                      } as any)}
+                    </strong>
+                    {addIsMasked && (
+                      <span className="text-[10px] text-indigo-300 font-mono block mt-1.5 break-all">
+                        Plaintext: {addSelectedDestinations[0]}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <div className="mt-1.5 space-y-2">
+                    <span className="text-[10px] font-bold text-indigo-300 block font-mono">
+                      Mapping {addSelectedDestinations.length} original inputs to the same masked slot:
+                    </span>
+                    <div className="max-h-24 overflow-y-auto bg-slate-950 p-2 rounded border border-slate-800 space-y-1 text-[10px] font-mono custom-scrollbar">
+                      {addSelectedDestinations.map((dest, i) => (
+                        <div key={i} className="flex justify-between gap-1 border-b border-slate-900 pb-1 last:border-0 last:pb-0 text-slate-300">
+                          <span className="truncate text-slate-400 max-w-[130px]">{dest}</span>
+                          <span className="text-indigo-400 shrink-0 font-bold">
+                            ➔ {getDisplayMaskedName({ 
+                                 destination: dest, 
+                                 isMasked: addIsMasked, 
+                                 maskedName: addMaskedName 
+                               } as any)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 py-1">
+                <div>
+                  <span className="text-[10px] text-slate-400 block uppercase tracking-wider font-semibold">Allocated Rate</span>
+                  <span className="text-sm font-bold font-mono text-white tracking-tight mt-0.5 block">
+                    ${addRate.toFixed(4)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 block uppercase tracking-wider font-semibold">Volume (Minutes)</span>
+                  <span className="text-sm font-bold font-mono text-white tracking-tight mt-0.5 block">
+                    {addVolume.toLocaleString()}
+                    {addIsVolumeLocked && <Lock size={10} className="inline ml-1 text-amber-500 animate-pulse" />}
+                  </span>
+                </div>
+              </div>
+
+              <div className="border-t border-slate-800 pt-3 flex justify-between items-center bg-slate-950 p-3 rounded-xl border border-slate-850 mt-2">
+                <div>
+                  <span className="text-[10px] text-cyan-300 block uppercase tracking-wider font-mono font-semibold">
+                    {addDirection === "inbound" ? "EXPECTED REVENUE" : "EXPECTED TRANSIT COST"}
+                  </span>
+                  <span className="text-[10px] text-slate-400">Yield computation</span>
+                </div>
+                <span className="text-lg font-bold font-mono text-cyan-200">
+                  ${(addVolume * addRate).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </div>
+            </div>
+
+            {/* Assistance Card */}
+            <div className="bg-indigo-50/50 rounded-2xl border border-indigo-100 p-5 space-y-3 shadow-3xs">
+              <h4 className="text-xs font-bold text-indigo-950 uppercase tracking-wider flex items-center gap-1.5">
+                <HelpCircle size={13} className="text-indigo-600" /> Dedicated Locking Rules Guide
+              </h4>
+              <ul className="text-xs text-indigo-900/80 space-y-2 list-disc pl-4 leading-relaxed">
+                <li>Simple destinations allow fast, manual inline edits to planned minutes directly within the spread cells.</li>
+                <li>When <strong>Lock Volume</strong> is checked, the volume is safely locked to the masked destination profile. Manual grid entry is disabled.</li>
+                <li>You can toggle active locking properties at any time via the Row Editor modal inside the main tables.</li>
+              </ul>
+            </div>
+          </div>
+
+        </div>
+      </motion.div>
+    )}
 
       </div>
 
@@ -1508,29 +2261,19 @@ export default function App() {
               </div>
 
               <form onSubmit={handleSaveInboundEdit} className="p-6 space-y-4">
-                {/* Destination / Masked Name Swap */}
+                {/* Destination Identity / Prefix */}
                 <div>
                   <label className="block text-xs font-bold text-slate-600 uppercase tracking-widest mb-1">
-                    {editingInbound.isMasked ? "Manual Masked Destination Name (Optional)" : "Destination Name / Prefix"}
+                    Destination Name / Prefix
                   </label>
-                  {editingInbound.isMasked ? (
-                    <input
-                      type="text"
-                      value={editingInbound.maskedName || ""}
-                      onChange={(e) => setEditingInbound({ ...editingInbound, maskedName: e.target.value })}
-                      className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-3 py-2 text-sm transition-all text-slate-800 placeholder:text-slate-400 focus:outline-hidden"
-                      placeholder={maskDestination(editingInbound.destination) || "Enter a custom masked alias..."}
-                    />
-                  ) : (
-                    <input
-                      type="text"
-                      required
-                      value={editingInbound.destination}
-                      onChange={(e) => setEditingInbound({ ...editingInbound, destination: e.target.value })}
-                      className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-3 py-2 text-sm transition-all text-slate-800 placeholder:text-slate-300 focus:outline-hidden"
-                      placeholder="e.g. Saudi Arabia STC Mobiles (966)"
-                    />
-                  )}
+                  <input
+                    type="text"
+                    required
+                    value={editingInbound.destination}
+                    onChange={(e) => setEditingInbound({ ...editingInbound, destination: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-3 py-2 text-sm transition-all text-slate-800 placeholder:text-slate-300 focus:outline-hidden"
+                    placeholder="e.g. United Kingdom Mobiles O2 (447)"
+                  />
                 </div>
 
                 {/* Sub-group inputs */}
@@ -1603,21 +2346,7 @@ export default function App() {
                       )}
                     </button>
                   </div>
-                  {editingInbound.isMasked ? (
-                    <div className="border-t border-slate-200/60 pt-3">
-                      <label className="block text-xs font-bold text-slate-650 uppercase tracking-wider mb-1.5">
-                        Destination Name / Prefix
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={editingInbound.destination}
-                        onChange={(e) => setEditingInbound({ ...editingInbound, destination: e.target.value })}
-                        className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-3 py-1.5 text-xs transition-all text-slate-850 placeholder:text-slate-400 focus:outline-hidden"
-                        placeholder="e.g. United Kingdom Mobiles O2 (447)"
-                      />
-                    </div>
-                  ) : (
+                  {editingInbound.isMasked && (
                     <div className="border-t border-slate-200/60 pt-3">
                       <label className="block text-xs font-bold text-slate-650 uppercase tracking-wider mb-1.5">
                         Manual Masked Destination Name (Optional)
@@ -1705,29 +2434,19 @@ export default function App() {
               </div>
 
               <form onSubmit={handleSaveOutboundEdit} className="p-6 space-y-4">
-                {/* Destination / Masked Name Swap */}
+                {/* Destination Identity / Prefix */}
                 <div>
                   <label className="block text-xs font-bold text-slate-600 uppercase tracking-widest mb-1">
-                    {editingOutbound.isMasked ? "Manual Masked Destination Name (Optional)" : "Destination Name / Prefix"}
+                    Destination Name / Prefix
                   </label>
-                  {editingOutbound.isMasked ? (
-                    <input
-                      type="text"
-                      value={editingOutbound.maskedName || ""}
-                      onChange={(e) => setEditingOutbound({ ...editingOutbound, maskedName: e.target.value })}
-                      className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-3 py-2 text-sm transition-all text-slate-800 placeholder:text-slate-400 focus:outline-hidden"
-                      placeholder={maskDestination(editingOutbound.destination) || "Enter a custom masked alias..."}
-                    />
-                  ) : (
-                    <input
-                      type="text"
-                      required
-                      value={editingOutbound.destination}
-                      onChange={(e) => setEditingOutbound({ ...editingOutbound, destination: e.target.value })}
-                      className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-3 py-2 text-sm transition-all text-slate-800 placeholder:text-slate-300 focus:outline-hidden"
-                      placeholder="e.g. United Kingdom Mobiles Vodafone (447)"
-                    />
-                  )}
+                  <input
+                    type="text"
+                    required
+                    value={editingOutbound.destination}
+                    onChange={(e) => setEditingOutbound({ ...editingOutbound, destination: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-3 py-2 text-sm transition-all text-slate-800 placeholder:text-slate-300 focus:outline-hidden"
+                    placeholder="e.g. United Kingdom Mobiles Vodafone (447)"
+                  />
                 </div>
 
                 {/* Sub-group inputs */}
@@ -1800,21 +2519,7 @@ export default function App() {
                       )}
                     </button>
                   </div>
-                  {editingOutbound.isMasked ? (
-                    <div className="border-t border-slate-200/60 pt-3">
-                      <label className="block text-xs font-bold text-slate-650 uppercase tracking-wider mb-1.5">
-                        Destination Name / Prefix
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={editingOutbound.destination}
-                        onChange={(e) => setEditingOutbound({ ...editingOutbound, destination: e.target.value })}
-                        className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-3 py-1.5 text-xs transition-all text-slate-855 placeholder:text-slate-400 focus:outline-hidden"
-                        placeholder="e.g. United Kingdom Mobiles Vodafone (447)"
-                      />
-                    </div>
-                  ) : (
+                  {editingOutbound.isMasked && (
                     <div className="border-t border-slate-200/60 pt-3">
                       <label className="block text-xs font-bold text-slate-650 uppercase tracking-wider mb-1.5">
                         Manual Masked Destination Name (Optional)
@@ -1828,6 +2533,24 @@ export default function App() {
                       />
                     </div>
                   )}
+
+                  {/* Volume Locking State Switcher */}
+                  <div className="border-t border-slate-200/60 pt-3 flex items-center justify-between">
+                    <div>
+                      <span className="block text-xs font-bold text-slate-650 uppercase tracking-wider">
+                        Lock Volume directly to Masked Destination
+                      </span>
+                      <span className="block text-[11px] text-amber-600 font-medium">
+                        Disables inline spreadsheet grid entry for planned minutes
+                      </span>
+                    </div>
+                    <input 
+                      type="checkbox" 
+                      checked={!!editingOutbound.isVolumeLocked}
+                      onChange={(e) => setEditingOutbound({ ...editingOutbound, isVolumeLocked: e.target.checked })}
+                      className="rounded border-slate-300 text-amber-600 focus:ring-amber-550 h-4 w-4 cursor-pointer focus:outline-hidden"
+                    />
+                  </div>
                 </div>
 
                 {/* Calculation cost readout */}
