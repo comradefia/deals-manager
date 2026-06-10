@@ -530,33 +530,49 @@ export default function App() {
 
   // Delete row targets
   const deleteInboundRow = (id: string) => {
-    setInboundRows(prev => prev.filter(r => r.id !== id));
+    const targetRow = inboundRows.find(r => r.id === id);
+    if (targetRow) {
+      if (targetRow.isMasked) {
+        const targetMaskedName = getDisplayMaskedName(targetRow).trim().toLowerCase();
+        setInboundRows(prev => prev.filter(r => !r.isMasked || getDisplayMaskedName(r).trim().toLowerCase() !== targetMaskedName));
+      } else {
+        setInboundRows(prev => prev.filter(r => r.id !== id));
+      }
+    }
     if (editingInbound?.id === id) setEditingInbound(null);
   };
 
   const deleteOutboundRow = (id: string) => {
-    setOutboundRows(prev => prev.filter(r => r.id !== id));
+    const targetRow = outboundRows.find(r => r.id === id);
+    if (targetRow) {
+      if (targetRow.isMasked) {
+        const targetMaskedName = getDisplayMaskedName(targetRow).trim().toLowerCase();
+        setOutboundRows(prev => prev.filter(r => !r.isMasked || getDisplayMaskedName(r).trim().toLowerCase() !== targetMaskedName));
+      } else {
+        setOutboundRows(prev => prev.filter(r => r.id !== id));
+      }
+    }
     if (editingOutbound?.id === id) setEditingOutbound(null);
   };
 
   // Inline inputs update handler
   const updateInboundValue = (id: string, field: keyof InboundRow, value: any) => {
     setInboundRows(prevInbound => {
+      const targetRow = prevInbound.find(r => r.id === id);
+      const isTargetMasked = targetRow?.isMasked;
+      const tMaskedName = targetRow ? getDisplayMaskedName(targetRow).trim().toLowerCase() : "";
+
       const updatedInbound = prevInbound.map(row => {
-        if (row.id === id) {
+        if (row.id === id || (isTargetMasked && row.isMasked && getDisplayMaskedName(row).trim().toLowerCase() === tMaskedName)) {
           return { ...row, [field]: value };
         }
         return row;
       });
 
-      if (field === "plannedMinutes") {
-        const targetRow = updatedInbound.find(r => r.id === id);
-        if (targetRow && targetRow.isMasked) {
-          const mName = getDisplayMaskedName(targetRow);
-          const synced = syncMinutesForMaskedName(mName, value, updatedInbound, outboundRows);
-          setOutboundRows(synced.outbound);
-          return synced.inbound;
-        }
+      if (field === "plannedMinutes" && isTargetMasked && tMaskedName) {
+        const synced = syncMinutesForMaskedName(tMaskedName, value, updatedInbound, outboundRows);
+        setOutboundRows(synced.outbound);
+        return synced.inbound;
       }
       return updatedInbound;
     });
@@ -564,21 +580,21 @@ export default function App() {
 
   const updateOutboundValue = (id: string, field: keyof OutboundRow, value: any) => {
     setOutboundRows(prevOutbound => {
+      const targetRow = prevOutbound.find(r => r.id === id);
+      const isTargetMasked = targetRow?.isMasked;
+      const tMaskedName = targetRow ? getDisplayMaskedName(targetRow).trim().toLowerCase() : "";
+
       const updatedOutbound = prevOutbound.map(row => {
-        if (row.id === id) {
+        if (row.id === id || (isTargetMasked && row.isMasked && getDisplayMaskedName(row).trim().toLowerCase() === tMaskedName)) {
           return { ...row, [field]: value };
         }
         return row;
       });
 
-      if (field === "plannedMinutes") {
-        const targetRow = updatedOutbound.find(r => r.id === id);
-        if (targetRow && targetRow.isMasked) {
-          const mName = getDisplayMaskedName(targetRow);
-          const synced = syncMinutesForMaskedName(mName, value, inboundRows, updatedOutbound);
-          setInboundRows(synced.inbound);
-          return synced.outbound;
-        }
+      if (field === "plannedMinutes" && isTargetMasked && tMaskedName) {
+        const synced = syncMinutesForMaskedName(tMaskedName, value, inboundRows, updatedOutbound);
+        setInboundRows(synced.inbound);
+        return synced.outbound;
       }
       return updatedOutbound;
     });
@@ -649,13 +665,43 @@ export default function App() {
     }
   };
 
+  // Filtered/deduplicated lists for rendering in the tables
+  // Shows only masked destinations with no replicas
+  const displayedInboundRows = useMemo(() => {
+    const maskedOnly = inboundRows.filter(row => row.isMasked);
+    const seenNames = new Set<string>();
+    const uniqueRows: InboundRow[] = [];
+    maskedOnly.forEach(row => {
+      const name = getDisplayMaskedName(row).trim().toLowerCase();
+      if (!seenNames.has(name)) {
+        seenNames.add(name);
+        uniqueRows.push(row);
+      }
+    });
+    return uniqueRows;
+  }, [inboundRows]);
+
+  const displayedOutboundRows = useMemo(() => {
+    const maskedOnly = outboundRows.filter(row => row.isMasked);
+    const seenNames = new Set<string>();
+    const uniqueRows: OutboundRow[] = [];
+    maskedOnly.forEach(row => {
+      const name = getDisplayMaskedName(row).trim().toLowerCase();
+      if (!seenNames.has(name)) {
+        seenNames.add(name);
+        uniqueRows.push(row);
+      }
+    });
+    return uniqueRows;
+  }, [outboundRows]);
+
   // Live summations and key stats calculations
   const totals = useMemo(() => {
     // Inbound calculations
     let totalInboundMinutes = 0;
     let totalPlannedRevenue = 0;
 
-    inboundRows.forEach(row => {
+    displayedInboundRows.forEach(row => {
       const mins = Math.max(0, Number(row.plannedMinutes) || 0);
       const rpm = Math.max(0, Number(row.rpm) || 0);
       totalInboundMinutes += mins;
@@ -667,7 +713,7 @@ export default function App() {
     let totalOutboundMinutes = 0;
     let totalPlannedCost = 0;
 
-    outboundRows.forEach(row => {
+    displayedOutboundRows.forEach(row => {
       const mins = Math.max(0, Number(row.plannedMinutes) || 0);
       const cpm = Math.max(0, Number(row.cpm) || 0);
       totalOutboundMinutes += mins;
@@ -1269,7 +1315,7 @@ export default function App() {
                 </thead>
                 <tbody className="divide-y divide-slate-150">
                   <AnimatePresence initial={false}>
-                    {inboundRows.length === 0 ? (
+                    {displayedInboundRows.length === 0 ? (
                       <motion.tr 
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
@@ -1281,7 +1327,7 @@ export default function App() {
                         </td>
                       </motion.tr>
                     ) : (
-                      inboundRows.map((row, idx) => {
+                      displayedInboundRows.map((row, idx) => {
                         const plannedRevenue = row.plannedMinutes * row.rpm;
                         return (
                           <motion.tr
@@ -1500,7 +1546,7 @@ export default function App() {
                 </thead>
                 <tbody className="divide-y divide-slate-150">
                   <AnimatePresence initial={false}>
-                    {outboundRows.length === 0 ? (
+                    {displayedOutboundRows.length === 0 ? (
                       <motion.tr 
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
@@ -1512,7 +1558,7 @@ export default function App() {
                         </td>
                       </motion.tr>
                     ) : (
-                      outboundRows.map((row, idx) => {
+                      displayedOutboundRows.map((row, idx) => {
                         const plannedCost = row.plannedMinutes * row.cpm;
                         return (
                           <motion.tr
