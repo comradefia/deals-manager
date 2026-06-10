@@ -991,14 +991,25 @@ export default function App() {
                             <td className="py-2 px-2">
                               <div className="flex flex-col gap-1">
                                 <div className="flex items-center gap-1">
-                                  <input
-                                    type="text"
-                                    value={row.destination}
-                                    onChange={(e) => updateInboundValue(row.id, "destination", e.target.value)}
-                                    placeholder="Destination location..."
-                                    className="w-full bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-emerald-500 rounded border border-slate-200 hover:border-slate-300 px-2.5 py-1 text-xs transition-all focus:border-emerald-500 font-medium placeholder:text-slate-300 focus:outline-hidden"
-                                    title="Edit destination location"
-                                  />
+                                  {row.isMasked ? (
+                                    <input
+                                      type="text"
+                                      value={row.maskedName || ""}
+                                      onChange={(e) => updateInboundValue(row.id, "maskedName", e.target.value)}
+                                      placeholder={maskDestination(row.destination) || "Enter custom masked alias..."}
+                                      className="w-full bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-emerald-500 rounded border border-slate-200 hover:border-slate-300 px-2.5 py-1 text-xs transition-all focus:border-emerald-500 font-medium placeholder:text-slate-400 focus:outline-hidden"
+                                      title="Edit Manual Masked Destination Name (Optional)"
+                                    />
+                                  ) : (
+                                    <input
+                                      type="text"
+                                      value={row.destination}
+                                      onChange={(e) => updateInboundValue(row.id, "destination", e.target.value)}
+                                      placeholder="Destination location..."
+                                      className="w-full bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-emerald-500 rounded border border-slate-200 hover:border-slate-300 px-2.5 py-1 text-xs transition-all focus:border-emerald-500 font-medium placeholder:text-slate-300 focus:outline-hidden"
+                                      title="Edit destination location"
+                                    />
+                                  )}
                                   <button
                                     type="button"
                                     onClick={() => updateInboundValue(row.id, "isMasked", !row.isMasked)}
@@ -1011,14 +1022,14 @@ export default function App() {
                                 {row.isMasked && (
                                   <div className="mt-1 flex flex-col gap-1 pl-1">
                                     <div className="flex items-center gap-1.5">
-                                      <span className="text-[10px] text-emerald-600 shrink-0 font-semibold font-mono">Masked Name:</span>
+                                      <span className="text-[10px] text-emerald-600 shrink-0 font-semibold font-mono">Original:</span>
                                       <input
                                         type="text"
-                                        value={row.maskedName || ""}
-                                        onChange={(e) => updateInboundValue(row.id, "maskedName", e.target.value)}
-                                        placeholder={maskDestination(row.destination) || "Custom masked alias..."}
+                                        value={row.destination}
+                                        onChange={(e) => updateInboundValue(row.id, "destination", e.target.value)}
+                                        placeholder="Destination Name / Prefix..."
                                         className="w-full bg-emerald-50/40 hover:bg-white focus:bg-white text-slate-750 focus:ring-1 focus:ring-emerald-500 rounded border border-emerald-100 px-2 py-0.5 text-[10px] font-mono transition-all focus:border-emerald-500 placeholder:text-slate-400 focus:outline-hidden"
-                                        title="Manually enter custom masked name"
+                                        title="Edit raw destination"
                                       />
                                     </div>
                                     <span className="block text-[9px] font-mono text-slate-450 pl-0.5" title="Final active representation">
@@ -1219,14 +1230,25 @@ export default function App() {
                             <td className="py-2 px-2">
                               <div className="flex flex-col gap-1">
                                 <div className="flex items-center gap-1">
-                                  <input
-                                    type="text"
-                                    value={row.destination}
-                                    onChange={(e) => updateOutboundValue(row.id, "destination", e.target.value)}
-                                    placeholder="Destination location..."
-                                    className="w-full bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-amber-500 rounded border border-slate-200 hover:border-slate-300 px-2.5 py-1 text-xs transition-all focus:border-amber-500 font-medium placeholder:text-slate-300 focus:outline-hidden"
-                                    title="Edit destination location"
-                                  />
+                                  {row.isMasked ? (
+                                    <input
+                                      type="text"
+                                      value={row.maskedName || ""}
+                                      onChange={(e) => updateOutboundValue(row.id, "maskedName", e.target.value)}
+                                      placeholder={maskDestination(row.destination) || "Enter custom masked alias..."}
+                                      className="w-full bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-amber-500 rounded border border-slate-200 hover:border-slate-300 px-2.5 py-1 text-xs transition-all focus:border-amber-500 font-medium placeholder:text-slate-400 focus:outline-hidden"
+                                      title="Edit Manual Masked Destination Name (Optional)"
+                                    />
+                                  ) : (
+                                    <input
+                                      type="text"
+                                      value={row.destination}
+                                      onChange={(e) => updateOutboundValue(row.id, "destination", e.target.value)}
+                                      placeholder="Destination location..."
+                                      className="w-full bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-amber-500 rounded border border-slate-200 hover:border-slate-300 px-2.5 py-1 text-xs transition-all focus:border-amber-500 font-medium placeholder:text-slate-300 focus:outline-hidden"
+                                      title="Edit destination location"
+                                    />
+                                  )}
                                   <button
                                     type="button"
                                     onClick={() => updateOutboundValue(row.id, "isMasked", !row.isMasked)}
@@ -1239,14 +1261,14 @@ export default function App() {
                                 {row.isMasked && (
                                   <div className="mt-1 flex flex-col gap-1 pl-1">
                                     <div className="flex items-center gap-1.5">
-                                      <span className="text-[10px] text-amber-600 shrink-0 font-semibold font-mono">Masked Name:</span>
+                                      <span className="text-[10px] text-amber-600 shrink-0 font-semibold font-mono">Original:</span>
                                       <input
                                         type="text"
-                                        value={row.maskedName || ""}
-                                        onChange={(e) => updateOutboundValue(row.id, "maskedName", e.target.value)}
-                                        placeholder={maskDestination(row.destination) || "Custom masked alias..."}
+                                        value={row.destination}
+                                        onChange={(e) => updateOutboundValue(row.id, "destination", e.target.value)}
+                                        placeholder="Destination Name / Prefix..."
                                         className="w-full bg-amber-50/40 hover:bg-white focus:bg-white text-slate-755 focus:ring-1 focus:ring-amber-500 rounded border border-amber-100 px-2 py-0.5 text-[10px] font-mono transition-all focus:border-amber-500 placeholder:text-slate-400 focus:outline-hidden"
-                                        title="Manually enter custom masked name"
+                                        title="Edit raw destination"
                                       />
                                     </div>
                                     <span className="block text-[9px] font-mono text-slate-450 pl-0.5" title="Final active representation">
