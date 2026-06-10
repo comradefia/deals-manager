@@ -37,17 +37,17 @@ import { InboundRow, OutboundRow } from "./types";
 // Unique ID helper
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
-// Initial sample logistics rows to provide immediate utility
+// Initial sample telecom swap rows to provide immediate utility
 const INITIAL_INBOUND: InboundRow[] = [
-  { id: "in-1", destination: "Chicago Hub Terminal 3G", isMasked: true, plannedMinutes: 180, rpm: 4.50 },
-  { id: "in-2", destination: "Los Angeles Port Docks 14", isMasked: true, plannedMinutes: 320, rpm: 3.85 },
-  { id: "in-3", destination: "Dallas Core Distribution Center", isMasked: true, plannedMinutes: 90, rpm: 5.20 }
+  { id: "in-1", destination: "United Kingdom Mobiles O2 (447)", isMasked: true, plannedMinutes: 250000, rpm: 0.032 },
+  { id: "in-2", destination: "Saudi Arabia STC Mobiles (966)", isMasked: true, plannedMinutes: 120000, rpm: 0.075 },
+  { id: "in-3", destination: "Germany T-Mobile Trunks (491)", isMasked: true, plannedMinutes: 180000, rpm: 0.024 }
 ];
 
 const INITIAL_OUTBOUND: OutboundRow[] = [
-  { id: "out-1", destination: "New York JFK Logistics Depot", isMasked: true, plannedMinutes: 240, cpm: 2.75 },
-  { id: "out-2", destination: "Seattle Rail Station Terminal 9", isMasked: true, plannedMinutes: 150, cpm: 3.10 },
-  { id: "out-3", destination: "Atlanta International Hub Facility", isMasked: true, plannedMinutes: 210, cpm: 2.45 }
+  { id: "out-1", destination: "United Kingdom Mobiles Vodafone (447)", isMasked: true, plannedMinutes: 200000, cpm: 0.029 },
+  { id: "out-2", destination: "Saudi Arabia Mobily Trunks (966)", isMasked: true, plannedMinutes: 150000, cpm: 0.068 },
+  { id: "out-3", destination: "Germany Vodafone Swaps (491)", isMasked: true, plannedMinutes: 140000, cpm: 0.021 }
 ];
 
 // Aesthetic masking helper function
@@ -83,8 +83,8 @@ export default function App() {
   const [parsingError, setParsingError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [importTarget, setImportTarget] = useState<"inbound" | "outbound">("inbound");
-  const [defaultMinutes, setDefaultMinutes] = useState<number>(120);
-  const [defaultRate, setDefaultRate] = useState<number>(3.50);
+  const [defaultMinutes, setDefaultMinutes] = useState<number>(100000);
+  const [defaultRate, setDefaultRate] = useState<number>(0.030);
   const [isImporting, setIsImporting] = useState<boolean>(false);
   const [importSuccessMsg, setImportSuccessMsg] = useState<string | null>(null);
 
@@ -201,7 +201,7 @@ export default function App() {
         setOutboundRows(prev => [...prev, ...newRows]);
       }
 
-      setImportSuccessMsg(`Successfully imported ${parsedDestinations.length} cargo routes with customized planned parameters (${defaultMinutes} mins, $${defaultRate.toFixed(2)} rate)!`);
+      setImportSuccessMsg(`Successfully imported ${parsedDestinations.length} telecom trunks with customized planned parameters (${defaultMinutes.toLocaleString()} mins, $${defaultRate.toFixed(4)} rate)!`);
       // Reset state
       setParsedDestinations([]);
       setFileName("");
@@ -211,16 +211,16 @@ export default function App() {
 
   const handleDownloadTemplate = () => {
     const sampleRows = [
-      { "original destination": "Chicago Terminal Central Hub A" },
-      { "original destination": "Houston Logistics Harbor Terminal 5" },
-      { "original destination": "Miami Cargo Port Berth 12" },
-      { "original destination": "Denver Central Rails Hub A" },
-      { "original destination": "Seattle Export Cargo Wharf-Side D" }
+      { "original destination": "United Kingdom Mobiles O2 (447)" },
+      { "original destination": "Saudi Arabia STC Mobiles (966)" },
+      { "original destination": "Germany T-Mobile Trunks (491)" },
+      { "original destination": "United States Mobiles AT&T (12)" },
+      { "original destination": "France Orange Mobiles (33)" }
     ];
     const ws = XLSX.utils.json_to_sheet(sampleRows);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Cargo Sheet");
-    XLSX.writeFile(wb, "logistics_cargo_import_template.xlsx");
+    XLSX.utils.book_append_sheet(wb, ws, "Telecom Swap Sheet");
+    XLSX.writeFile(wb, "telecom_swap_import_template.xlsx");
   };
 
   const handleClearExcelUpload = () => {
@@ -247,10 +247,10 @@ export default function App() {
   const addInboundRow = () => {
     const newRow: InboundRow = {
       id: generateId(),
-      destination: `Route ${inboundRows.length + 1} Hub`,
+      destination: `Voice Inbound Trunk (Prefix ${inboundRows.length + 1})`,
       isMasked: allInboundMasked,
-      plannedMinutes: 120,
-      rpm: 3.50
+      plannedMinutes: 100000,
+      rpm: 0.035
     };
     setInboundRows(prev => [...prev, newRow]);
     // Immediately open edit modal for user convenience
@@ -260,10 +260,10 @@ export default function App() {
   const addOutboundRow = () => {
     const newRow: OutboundRow = {
       id: generateId(),
-      destination: `Route ${outboundRows.length + 1} Center`,
+      destination: `Voice Outbound Trunk (Prefix ${outboundRows.length + 1})`,
       isMasked: allOutboundMasked,
-      plannedMinutes: 120,
-      cpm: 2.50
+      plannedMinutes: 100000,
+      cpm: 0.025
     };
     setOutboundRows(prev => [...prev, newRow]);
     // Immediately open edit modal for user convenience
@@ -398,15 +398,15 @@ export default function App() {
               <span className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg inline-flex">
                 <Sparkles size={20} />
               </span>
-              <span className="text-xs font-mono tracking-widest uppercase bg-slate-100 px-2 py-1 text-slate-600 rounded">
-                Cargo Operations Dispatcher
+              <span className="text-xs font-mono tracking-widest uppercase bg-indigo-50 px-2.5 py-1 text-indigo-750 font-semibold rounded">
+                Carrier wholesale & SMS/Voice Swap
               </span>
             </div>
             <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 sm:text-4xl" id="app-title">
-              Logistics Deal Layout Tracker
+              Telecom Bilateral Swap Deal Tracker
             </h1>
             <p className="mt-2 text-sm text-slate-500 max-w-2xl">
-              Add, update, and manage inbound cargo and outbound routing. Edit any cell inline or click editing icons for fine-grained modal controls.
+              Model, track, and balance telecom wholesale traffic swaps. Manage Inbound (terminating rate revenue) and Outbound (origination transit costs) easily.
             </p>
           </div>
 
@@ -455,30 +455,30 @@ export default function App() {
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 text-sm mt-3">
                   <div className="bg-indigo-900/50 p-4 rounded-lg border border-indigo-850">
-                    <span className="block font-mono text-cyan-300 font-semibold mb-1">INBOUND TABLE EQUATION</span>
+                    <span className="block font-mono text-cyan-300 font-semibold mb-1">INBOUND SWAP REVENUE</span>
                     <p className="text-indigo-200">
                       Planned Revenue = Planned Minutes × RPM
                     </p>
                     <p className="text-xs text-indigo-300/80 mt-1">
-                      (RPM = Revenue Per Minute. Computes automatically as you alter minutes or rate parameters)
+                      (RPM = Revenue Per Minute. Incoming carrier voice termination terminating on your network)
                     </p>
                   </div>
                   <div className="bg-indigo-900/50 p-4 rounded-lg border border-indigo-850">
-                    <span className="block font-mono text-cyan-300 font-semibold mb-1">OUTBOUND TABLE EQUATION</span>
+                    <span className="block font-mono text-cyan-300 font-semibold mb-1">OUTBOUND SWAP COST</span>
                     <p className="text-indigo-200">
                       Planned Cost = Planned Minutes × CPM
                     </p>
                     <p className="text-xs text-indigo-300/80 mt-1">
-                      (CPM = Cost Per Minute / cost parameter. Calculate automatically below each row)
+                      (CPM = Cost Per Minute. Cost of sending voice traffic to the partner's network)
                     </p>
                   </div>
                   <div className="bg-indigo-900/50 p-4 rounded-lg border border-indigo-850 md:col-span-2 lg:col-span-1">
-                    <span className="block font-mono text-cyan-300 font-semibold mb-1">MUTUAL MARGIN BALANCE</span>
+                    <span className="block font-mono text-cyan-300 font-semibold mb-1">NET SETTLEMENT MARGIN</span>
                     <p className="text-indigo-200">
                       Margin = Total Planned Revenue − Total Planned Cost
                     </p>
                     <p className="text-xs text-indigo-300/80 mt-1">
-                      Gives instant corporate health checks of combined supply-chain transactions.
+                      Shows the net payout or receivable amount at the end of the bilateral cycle.
                     </p>
                   </div>
                 </div>
@@ -670,7 +670,7 @@ export default function App() {
                 <div className="mt-4 p-4 bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-xl flex items-start gap-2 text-sm">
                   <FileCheck size={16} className="mt-0.5 text-emerald-600 shrink-0" />
                   <div>
-                    <h5 className="font-bold">Logistics Database Updated</h5>
+                    <h5 className="font-bold">Telecom Swap Database Updated</h5>
                     <p className="text-xs text-emerald-700 mt-0.5">{importSuccessMsg}</p>
                   </div>
                 </div>
@@ -692,7 +692,7 @@ export default function App() {
                           Import Configuration & settings
                         </span>
                         <span className="text-xs font-mono bg-indigo-55 text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded font-semibold">
-                          {parsedDestinations.length} Discovered Routes
+                          {parsedDestinations.length} Discovered Trunks
                         </span>
                       </div>
 
@@ -701,15 +701,15 @@ export default function App() {
                         {/* Target Table Dropdown Selector */}
                         <div>
                           <label className="block text-xs font-semibold text-slate-500 mb-1">
-                            Target Logistics Table
+                            Target Deal Stream Table
                           </label>
                           <select
                             value={importTarget}
                             onChange={(e) => setImportTarget(e.target.value as "inbound" | "outbound")}
                             className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-3 py-1.5 text-xs transition-all focus:outline-hidden"
                           >
-                            <option value="inbound">Inbound Logistics (Revenue Route Stream)</option>
-                            <option value="outbound">Outbound Logistics (Cost Supply Corridor)</option>
+                            <option value="inbound">Inbound Routes (Revenue Swap Stream)</option>
+                            <option value="outbound">Outbound Routes (Cost Swap Stream)</option>
                           </select>
                         </div>
 
@@ -811,8 +811,8 @@ export default function App() {
                   <ArrowDownLeft size={20} />
                 </span>
                 <div>
-                  <h2 className="text-lg font-bold text-slate-900">Inbound Logistics</h2>
-                  <p className="text-xs text-slate-500">Incoming contract streams (Editable Real-time)</p>
+                  <h2 className="text-lg font-bold text-slate-900">Inbound Voice Swaps</h2>
+                  <p className="text-xs text-slate-500">Traffic terminated on our network (Revenue stream)</p>
                 </div>
               </div>
               
@@ -939,10 +939,10 @@ export default function App() {
                                 <input
                                   type="number"
                                   min="0"
-                                  step="0.01"
+                                  step="0.0001"
                                   value={row.rpm === 0 ? "" : row.rpm}
                                   onChange={(e) => updateInboundValue(row.id, "rpm", Math.max(0, parseFloat(e.target.value) || 0))}
-                                  placeholder="0.00"
+                                  placeholder="0.0000"
                                   className="w-full font-mono text-xs text-right bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-emerald-500 rounded border border-slate-200 hover:border-slate-300 pl-4 pr-1.5 py-1 transition-all focus:border-emerald-500 focus:outline-hidden"
                                   title="Edit Revenue Per Minute (RPM)"
                                 />
@@ -1026,8 +1026,8 @@ export default function App() {
                   <ArrowUpRight size={20} />
                 </span>
                 <div>
-                  <h2 className="text-lg font-bold text-slate-900">Outbound Logistics</h2>
-                  <p className="text-xs text-slate-500">Outgoing supply corridors (Editable Real-time)</p>
+                  <h2 className="text-lg font-bold text-slate-900">Outbound Voice Swaps</h2>
+                  <p className="text-xs text-slate-500">Traffic sent to partners' networks (Cost stream)</p>
                 </div>
               </div>
               
@@ -1154,10 +1154,10 @@ export default function App() {
                                 <input
                                   type="number"
                                   min="0"
-                                  step="0.01"
+                                  step="0.0001"
                                   value={row.cpm === 0 ? "" : row.cpm}
                                   onChange={(e) => updateOutboundValue(row.id, "cpm", Math.max(0, parseFloat(e.target.value) || 0))}
-                                  placeholder="0.00"
+                                  placeholder="0.0000"
                                   className="w-full font-mono text-xs text-right bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-amber-500 rounded border-slate-200 hover:border-slate-300 pl-4 pr-1.5 py-1 transition-all focus:border-amber-500 focus:outline-hidden"
                                   title="Edit Cost Rate (CPM)"
                                 />
@@ -1231,18 +1231,18 @@ export default function App() {
 
         </div>
 
-        {/* Dynamic Joint Logistics Operations Analysis */}
+        {/* Dynamic Joint Telecom Swaps Operations Analysis */}
         <section className="mt-8 bg-slate-900 text-slate-100 p-6 rounded-2xl border border-slate-800 shadow-xl" id="analytics-section">
           <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
             <Coins size={18} className="text-indigo-400" />
-            Combined Cargo Yield & Operations Outlook
+            Bilateral Swap Yield & Settlement Performance
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             
             {/* Performance Indicators */}
             <div className="space-y-3">
               <div className="flex justify-between text-sm py-1 border-b border-slate-800">
-                <span className="text-slate-400">Inbound Corridor Share:</span>
+                <span className="text-slate-400">Inbound Traffic Share:</span>
                 <span className="font-mono text-emerald-400 font-semibold">
                   {totals.totalInboundMinutes + totals.totalOutboundMinutes > 0 
                     ? ((totals.totalInboundMinutes / (totals.totalInboundMinutes + totals.totalOutboundMinutes)) * 100).toFixed(0) 
@@ -1250,7 +1250,7 @@ export default function App() {
                 </span>
               </div>
               <div className="flex justify-between text-sm py-1 border-b border-slate-800">
-                <span className="text-slate-400">Outbound Corridor Share:</span>
+                <span className="text-slate-400">Outbound Traffic Share:</span>
                 <span className="font-mono text-amber-400 font-semibold">
                   {totals.totalInboundMinutes + totals.totalOutboundMinutes > 0 
                     ? ((totals.totalOutboundMinutes / (totals.totalInboundMinutes + totals.totalOutboundMinutes)) * 100).toFixed(0) 
@@ -1258,9 +1258,9 @@ export default function App() {
                 </span>
               </div>
               <div className="flex justify-between text-sm py-1">
-                <span className="text-slate-400">Combined Route Span:</span>
+                <span className="text-slate-400">Total Swapped Traffic:</span>
                 <span className="font-mono text-slate-200 font-semibold">
-                  {totals.totalInboundMinutes + totals.totalOutboundMinutes} mins
+                  {(totals.totalInboundMinutes + totals.totalOutboundMinutes).toLocaleString()} mins
                 </span>
               </div>
             </div>
@@ -1269,29 +1269,29 @@ export default function App() {
             <div className="flex flex-col justify-center space-y-4">
               <div>
                 <div className="flex justify-between text-xs text-slate-400 mb-1">
-                  <span>Inbound Revenue Speed ($ / minute)</span>
+                  <span>Average Inbound Rate (RPM)</span>
                   <span className="font-mono text-emerald-400">
-                    {totals.totalInboundMinutes > 0 ? (totals.totalPlannedRevenue / totals.totalInboundMinutes).toFixed(2) : "0.00"}
+                    ${totals.totalInboundMinutes > 0 ? (totals.totalPlannedRevenue / totals.totalInboundMinutes).toFixed(4) : "0.0000"}
                   </span>
                 </div>
                 <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
                   <div 
                     className="bg-emerald-500 h-2 rounded-full" 
-                    style={{ width: `${Math.min(100, Math.max(0, (totals.totalInboundMinutes > 0 ? (totals.totalPlannedRevenue / totals.totalInboundMinutes) : 0) * 15))}%` }}
+                    style={{ width: `${Math.min(100, Math.max(0, (totals.totalInboundMinutes > 0 ? (totals.totalPlannedRevenue / totals.totalInboundMinutes) : 0) * 1000))}%` }}
                   />
                 </div>
               </div>
               <div>
                 <div className="flex justify-between text-xs text-slate-400 mb-1">
-                  <span>Outbound Cost Speed ($ / minute)</span>
+                  <span>Average Outbound Rate (CPM)</span>
                   <span className="font-mono text-amber-400">
-                    {totals.totalOutboundMinutes > 0 ? (totals.totalPlannedCost / totals.totalOutboundMinutes).toFixed(2) : "0.00"}
+                    ${totals.totalOutboundMinutes > 0 ? (totals.totalPlannedCost / totals.totalOutboundMinutes).toFixed(4) : "0.0000"}
                   </span>
                 </div>
                 <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
                   <div 
                     className="bg-amber-500 h-2 rounded-full" 
-                    style={{ width: `${Math.min(100, Math.max(0, (totals.totalOutboundMinutes > 0 ? (totals.totalPlannedCost / totals.totalOutboundMinutes) : 0) * 15))}%` }}
+                    style={{ width: `${Math.min(100, Math.max(0, (totals.totalOutboundMinutes > 0 ? (totals.totalPlannedCost / totals.totalOutboundMinutes) : 0) * 1000))}%` }}
                   />
                 </div>
               </div>
@@ -1303,15 +1303,15 @@ export default function App() {
               <p className="text-sm text-slate-300 mt-2">
                 {totals.netMargin > 0 ? (
                   <>
-                    Combined routing parameters are currently <strong className="text-emerald-400">Positive</strong>. Inbound revenue speed exceeds outbound cost rates, yielding a net surplus pool of <strong className="text-emerald-400">${totals.netMargin.toLocaleString(undefined, {maximumFractionDigits: 0})}</strong>.
+                    Bilateral swap settlement parameters are currently <strong className="text-emerald-400">Receivable</strong>. Inbound revenue speed exceeds outbound cost rates, yielding a net surplus pool of <strong className="text-emerald-400">${totals.netMargin.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</strong>.
                   </>
                 ) : totals.netMargin < 0 ? (
                   <>
-                    Combined parameters results in a <strong className="text-rose-400">Profit Deficit</strong>. Outbound costs exceed inbound revenues. Try modifying the minutes, rate, or RPM configurations.
+                    Bilateral swap balance results in a <strong className="text-rose-400">Net Payable</strong> offset. Outbound cost corridors exceed inbound revenues. Try adjusting rates or committed voice volumes.
                   </>
                 ) : (
                   <>
-                    Inbound and Outbound logs are balanced. Add/edit cargo details to recalculate analytics instantly.
+                    Inbound and Outbound logs are balanced. Add/edit telecom prefix details to recalculate swap settlement instantly.
                   </>
                 )}
               </p>
@@ -1366,7 +1366,7 @@ export default function App() {
                 {/* Destination */}
                 <div>
                   <label className="block text-xs font-bold text-slate-600 uppercase tracking-widest mb-1">
-                    Destination Address / Hub Name
+                    Destination Name / Prefix
                   </label>
                   <input
                     type="text"
@@ -1374,7 +1374,7 @@ export default function App() {
                     value={editingInbound.destination}
                     onChange={(e) => setEditingInbound({ ...editingInbound, destination: e.target.value })}
                     className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-3 py-2 text-sm transition-all text-slate-800 placeholder:text-slate-300 focus:outline-hidden"
-                    placeholder="e.g. Chicago Hub Terminal 3G"
+                    placeholder="e.g. Saudi Arabia STC Mobiles (966)"
                   />
                 </div>
 
@@ -1523,7 +1523,7 @@ export default function App() {
                 {/* Destination */}
                 <div>
                   <label className="block text-xs font-bold text-slate-600 uppercase tracking-widest mb-1">
-                    Destination Address / Destination Hub
+                    Destination Name / Prefix
                   </label>
                   <input
                     type="text"
@@ -1531,7 +1531,7 @@ export default function App() {
                     value={editingOutbound.destination}
                     onChange={(e) => setEditingOutbound({ ...editingOutbound, destination: e.target.value })}
                     className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-3 py-2 text-sm transition-all text-slate-800 placeholder:text-slate-300 focus:outline-hidden"
-                    placeholder="e.g. New York JFK Logistics Depot"
+                    placeholder="e.g. United Kingdom Mobiles Vodafone (447)"
                   />
                 </div>
 

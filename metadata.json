@@ -1,6 +1,6 @@
 {
-  "name": "Logistics Deal Tracker",
-  "description": "A dynamic logistics tracking dashboard featuring real-time interactive Inbound and Outbound tables with automatic revenue and cost calculations.",
+  "name": "Telecom Swap Deal Tracker",
+  "description": "A dynamic voice minutes bilateral swap settlement tracker featuring real-time rate multipliers, inbound termination revenue, outbound cost corridors, offset calculations, and spreadsheet importing.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
