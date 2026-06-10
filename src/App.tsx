@@ -1486,19 +1486,29 @@ export default function App() {
               </div>
 
               <form onSubmit={handleSaveInboundEdit} className="p-6 space-y-4">
-                {/* Destination */}
+                {/* Destination / Masked Name Swap */}
                 <div>
                   <label className="block text-xs font-bold text-slate-600 uppercase tracking-widest mb-1">
-                    Destination Name / Prefix
+                    {editingInbound.isMasked ? "Manual Masked Destination Name (Optional)" : "Destination Name / Prefix"}
                   </label>
-                  <input
-                    type="text"
-                    required
-                    value={editingInbound.destination}
-                    onChange={(e) => setEditingInbound({ ...editingInbound, destination: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-3 py-2 text-sm transition-all text-slate-800 placeholder:text-slate-300 focus:outline-hidden"
-                    placeholder="e.g. Saudi Arabia STC Mobiles (966)"
-                  />
+                  {editingInbound.isMasked ? (
+                    <input
+                      type="text"
+                      value={editingInbound.maskedName || ""}
+                      onChange={(e) => setEditingInbound({ ...editingInbound, maskedName: e.target.value })}
+                      className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-3 py-2 text-sm transition-all text-slate-800 placeholder:text-slate-400 focus:outline-hidden"
+                      placeholder={maskDestination(editingInbound.destination) || "Enter a custom masked alias..."}
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      required
+                      value={editingInbound.destination}
+                      onChange={(e) => setEditingInbound({ ...editingInbound, destination: e.target.value })}
+                      className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-3 py-2 text-sm transition-all text-slate-800 placeholder:text-slate-300 focus:outline-hidden"
+                      placeholder="e.g. Saudi Arabia STC Mobiles (966)"
+                    />
+                  )}
                 </div>
 
                 {/* Sub-group inputs */}
@@ -1571,7 +1581,21 @@ export default function App() {
                       )}
                     </button>
                   </div>
-                  {editingInbound.isMasked && (
+                  {editingInbound.isMasked ? (
+                    <div className="border-t border-slate-200/60 pt-3">
+                      <label className="block text-xs font-bold text-slate-650 uppercase tracking-wider mb-1.5">
+                        Destination Name / Prefix
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={editingInbound.destination}
+                        onChange={(e) => setEditingInbound({ ...editingInbound, destination: e.target.value })}
+                        className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-3 py-1.5 text-xs transition-all text-slate-850 placeholder:text-slate-400 focus:outline-hidden"
+                        placeholder="e.g. United Kingdom Mobiles O2 (447)"
+                      />
+                    </div>
+                  ) : (
                     <div className="border-t border-slate-200/60 pt-3">
                       <label className="block text-xs font-bold text-slate-650 uppercase tracking-wider mb-1.5">
                         Manual Masked Destination Name (Optional)
@@ -1581,7 +1605,7 @@ export default function App() {
                         value={editingInbound.maskedName || ""}
                         onChange={(e) => setEditingInbound({ ...editingInbound, maskedName: e.target.value })}
                         className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-3 py-1.5 text-xs transition-all text-slate-850 placeholder:text-slate-400 focus:outline-hidden"
-                        placeholder={maskDestination(editingInbound.destination) || "Enter a custom masked alias..."}
+                        placeholder={maskDestination(editingInbound.destination) || "Enter custom masked alias..."}
                       />
                     </div>
                   )}
@@ -1659,19 +1683,29 @@ export default function App() {
               </div>
 
               <form onSubmit={handleSaveOutboundEdit} className="p-6 space-y-4">
-                {/* Destination */}
+                {/* Destination / Masked Name Swap */}
                 <div>
                   <label className="block text-xs font-bold text-slate-600 uppercase tracking-widest mb-1">
-                    Destination Name / Prefix
+                    {editingOutbound.isMasked ? "Manual Masked Destination Name (Optional)" : "Destination Name / Prefix"}
                   </label>
-                  <input
-                    type="text"
-                    required
-                    value={editingOutbound.destination}
-                    onChange={(e) => setEditingOutbound({ ...editingOutbound, destination: e.target.value })}
-                    className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-3 py-2 text-sm transition-all text-slate-800 placeholder:text-slate-300 focus:outline-hidden"
-                    placeholder="e.g. United Kingdom Mobiles Vodafone (447)"
-                  />
+                  {editingOutbound.isMasked ? (
+                    <input
+                      type="text"
+                      value={editingOutbound.maskedName || ""}
+                      onChange={(e) => setEditingOutbound({ ...editingOutbound, maskedName: e.target.value })}
+                      className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-3 py-2 text-sm transition-all text-slate-800 placeholder:text-slate-400 focus:outline-hidden"
+                      placeholder={maskDestination(editingOutbound.destination) || "Enter a custom masked alias..."}
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      required
+                      value={editingOutbound.destination}
+                      onChange={(e) => setEditingOutbound({ ...editingOutbound, destination: e.target.value })}
+                      className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-3 py-2 text-sm transition-all text-slate-800 placeholder:text-slate-300 focus:outline-hidden"
+                      placeholder="e.g. United Kingdom Mobiles Vodafone (447)"
+                    />
+                  )}
                 </div>
 
                 {/* Sub-group inputs */}
@@ -1744,7 +1778,21 @@ export default function App() {
                       )}
                     </button>
                   </div>
-                  {editingOutbound.isMasked && (
+                  {editingOutbound.isMasked ? (
+                    <div className="border-t border-slate-200/60 pt-3">
+                      <label className="block text-xs font-bold text-slate-650 uppercase tracking-wider mb-1.5">
+                        Destination Name / Prefix
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={editingOutbound.destination}
+                        onChange={(e) => setEditingOutbound({ ...editingOutbound, destination: e.target.value })}
+                        className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-3 py-1.5 text-xs transition-all text-slate-855 placeholder:text-slate-400 focus:outline-hidden"
+                        placeholder="e.g. United Kingdom Mobiles Vodafone (447)"
+                      />
+                    </div>
+                  ) : (
                     <div className="border-t border-slate-200/60 pt-3">
                       <label className="block text-xs font-bold text-slate-650 uppercase tracking-wider mb-1.5">
                         Manual Masked Destination Name (Optional)
@@ -1753,8 +1801,8 @@ export default function App() {
                         type="text"
                         value={editingOutbound.maskedName || ""}
                         onChange={(e) => setEditingOutbound({ ...editingOutbound, maskedName: e.target.value })}
-                        className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-3 py-1.5 text-xs transition-all text-slate-850 placeholder:text-slate-400 focus:outline-hidden"
-                        placeholder={maskDestination(editingOutbound.destination) || "Enter a custom masked alias..."}
+                        className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-3 py-1.5 text-xs transition-all text-slate-855 placeholder:text-slate-400 focus:outline-hidden"
+                        placeholder={maskDestination(editingOutbound.destination) || "Enter custom masked alias..."}
                       />
                     </div>
                   )}
