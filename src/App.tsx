@@ -33,7 +33,8 @@ import {
   ArrowLeft,
   ArrowRight,
   Search,
-  Save
+  Save,
+  ChevronDown
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { InboundRow, OutboundRow } from "./types";
@@ -154,10 +155,48 @@ function alignAllMaskedVolumes(
   return { inbound: alignedInbound, outbound: alignedOutbound };
 }
 
+// Proportional flow allocation helper to distribute parent total volume among virtual destinations
+function distributeVolumeToVirtualDestinations(
+  parentVolume: number,
+  virtuals: { id: string; destination: string; plannedMinutes: number; rate: number }[]
+) {
+  if (!virtuals || virtuals.length === 0) return [];
+  const currentSum = virtuals.reduce((sum, v) => sum + v.plannedMinutes, 0);
+  if (currentSum === 0) {
+    const perDest = Math.floor(parentVolume / virtuals.length);
+    const remainder = parentVolume - perDest * virtuals.length;
+    return virtuals.map((v, idx) => ({
+      ...v,
+      plannedMinutes: perDest + (idx === 0 ? remainder : 0)
+    }));
+  } else {
+    const ratio = parentVolume / currentSum;
+    let distributedSum = 0;
+    const nextVirtuals = virtuals.map((v) => {
+      const nextMin = Math.round(v.plannedMinutes * ratio);
+      distributedSum += nextMin;
+      return {
+        ...v,
+        plannedMinutes: nextMin
+      };
+    });
+    const difference = parentVolume - distributedSum;
+    if (difference !== 0 && nextVirtuals.length > 0) {
+      nextVirtuals[0].plannedMinutes = Math.max(0, nextVirtuals[0].plannedMinutes + difference);
+    }
+    return nextVirtuals;
+  }
+}
+
 export default function App() {
   // State for rows
   const [inboundRows, setInboundRows] = useState<InboundRow[]>(INITIAL_INBOUND);
   const [outboundRows, setOutboundRows] = useState<OutboundRow[]>(INITIAL_OUTBOUND);
+
+  // Virtual Destination Grouping & Locking states
+  const [groupAsVirtual, setGroupAsVirtual] = useState<boolean>(true);
+  const [virtualGroupName, setVirtualGroupName] = useState<string>("");
+  const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
 
   // Modal Editing States
   const [editingInbound, setEditingInbound] = useState<InboundRow | null>(null);
@@ -265,6 +304,10 @@ export default function App() {
     setUnmaskedIndices([]);
     setCustomMaskedNames({});
 
+    // Set dynamic default virtual destination group label based on file name
+    const prettyName = file.name ? file.name.replace(/\.[^/.]+$/, "") + " Group" : "Virtual Swap Group";
+    setVirtualGroupName(prettyName);
+
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
@@ -326,45 +369,107 @@ export default function App() {
     setIsImporting(true);
 
     setTimeout(() => {
+      const gName = (virtualGroupName || "Virtual Group").trim();
+
       if (importTarget === "inbound") {
-        const newRows: InboundRow[] = parsedDestinations.map((dest, idx) => {
-          const isUnmaskedSelected = unmaskedIndices.includes(idx);
-          return {
+        if (groupAsVirtual) {
+          const virtuals = parsedDestinations.map((dest, idx) => ({
             id: generateId(),
             destination: dest,
-            isMasked: !isUnmaskedSelected,
             plannedMinutes: defaultMinutes,
+            rate: defaultRate
+          }));
+          const totalVol = virtuals.reduce((sum, v) => sum + v.plannedMinutes, 0);
+
+          const newParentRow: InboundRow = {
+            id: generateId(),
+            destination: `Virtual Group: ${gName}`,
+            isMasked: true,
+            maskedName: gName,
+            plannedMinutes: totalVol,
             rpm: defaultRate,
-            maskedName: customMaskedNames[idx] || ""
+            isVolumeLocked: true,
+            virtualDestinations: virtuals
           };
-        });
-        setInboundRows(prev => {
-          const merged = [...prev, ...newRows];
-          const aligned = alignAllMaskedVolumes(merged, outboundRows);
-          setOutboundRows(aligned.outbound);
-          return aligned.inbound;
-        });
+
+          setInboundRows(prev => {
+            const merged = [...prev, newParentRow];
+            const aligned = alignAllMaskedVolumes(merged, outboundRows);
+            setOutboundRows(aligned.outbound);
+            return aligned.inbound;
+          });
+        } else {
+          const newRows: InboundRow[] = parsedDestinations.map((dest, idx) => {
+            const isUnmaskedSelected = unmaskedIndices.includes(idx);
+            return {
+              id: generateId(),
+              destination: dest,
+              isMasked: !isUnmaskedSelected,
+              plannedMinutes: defaultMinutes,
+              rpm: defaultRate,
+              maskedName: customMaskedNames[idx] || ""
+            };
+          });
+          setInboundRows(prev => {
+            const merged = [...prev, ...newRows];
+            const aligned = alignAllMaskedVolumes(merged, outboundRows);
+            setOutboundRows(aligned.outbound);
+            return aligned.inbound;
+          });
+        }
       } else {
-        const newRows: OutboundRow[] = parsedDestinations.map((dest, idx) => {
-          const isUnmaskedSelected = unmaskedIndices.includes(idx);
-          return {
+        if (groupAsVirtual) {
+          const virtuals = parsedDestinations.map((dest, idx) => ({
             id: generateId(),
             destination: dest,
-            isMasked: !isUnmaskedSelected,
             plannedMinutes: defaultMinutes,
+            rate: defaultRate
+          }));
+          const totalVol = virtuals.reduce((sum, v) => sum + v.plannedMinutes, 0);
+
+          const newParentRow: OutboundRow = {
+            id: generateId(),
+            destination: `Virtual Group: ${gName}`,
+            isMasked: true,
+            maskedName: gName,
+            plannedMinutes: totalVol,
             cpm: defaultRate,
-            maskedName: customMaskedNames[idx] || ""
+            isVolumeLocked: true,
+            virtualDestinations: virtuals
           };
-        });
-        setOutboundRows(prev => {
-          const merged = [...prev, ...newRows];
-          const aligned = alignAllMaskedVolumes(inboundRows, merged);
-          setInboundRows(aligned.inbound);
-          return aligned.outbound;
-        });
+
+          setOutboundRows(prev => {
+            const merged = [...prev, newParentRow];
+            const aligned = alignAllMaskedVolumes(inboundRows, merged);
+            setInboundRows(aligned.inbound);
+            return aligned.outbound;
+          });
+        } else {
+          const newRows: OutboundRow[] = parsedDestinations.map((dest, idx) => {
+            const isUnmaskedSelected = unmaskedIndices.includes(idx);
+            return {
+              id: generateId(),
+              destination: dest,
+              isMasked: !isUnmaskedSelected,
+              plannedMinutes: defaultMinutes,
+              cpm: defaultRate,
+              maskedName: customMaskedNames[idx] || ""
+            };
+          });
+          setOutboundRows(prev => {
+            const merged = [...prev, ...newRows];
+            const aligned = alignAllMaskedVolumes(inboundRows, merged);
+            setInboundRows(aligned.inbound);
+            return aligned.outbound;
+          });
+        }
       }
 
-      setImportSuccessMsg(`Successfully imported ${parsedDestinations.length} telecom trunks with customized planned parameters (${defaultMinutes.toLocaleString()} mins, $${defaultRate.toFixed(4)} rate)! Selected unmasked represents: ${unmaskedIndices.length} routes.`);
+      setImportSuccessMsg(
+        groupAsVirtual 
+          ? `Successfully imported ${parsedDestinations.length} virtual destinations locked inside the parent masked destination "${gName}"! The total volume is ${parsedDestinations.reduce((sum, _, idx) => sum + defaultMinutes, 0).toLocaleString()} mins.`
+          : `Successfully imported ${parsedDestinations.length} telecom trunks with customized planned parameters (${defaultMinutes.toLocaleString()} mins, $${defaultRate.toFixed(4)} rate)! Selected unmasked represents: ${unmaskedIndices.length} routes.`
+      );
       // Reset state
       setParsedDestinations([]);
       setFileName("");
@@ -564,7 +669,11 @@ export default function App() {
 
       const updatedInbound = prevInbound.map(row => {
         if (row.id === id || (isTargetMasked && row.isMasked && getDisplayMaskedName(row).trim().toLowerCase() === tMaskedName)) {
-          return { ...row, [field]: value };
+          let updatedItem = { ...row, [field]: value };
+          if (field === "plannedMinutes" && row.virtualDestinations && row.virtualDestinations.length > 0) {
+            updatedItem.virtualDestinations = distributeVolumeToVirtualDestinations(value, row.virtualDestinations);
+          }
+          return updatedItem;
         }
         return row;
       });
@@ -586,7 +695,11 @@ export default function App() {
 
       const updatedOutbound = prevOutbound.map(row => {
         if (row.id === id || (isTargetMasked && row.isMasked && getDisplayMaskedName(row).trim().toLowerCase() === tMaskedName)) {
-          return { ...row, [field]: value };
+          let updatedItem = { ...row, [field]: value };
+          if (field === "plannedMinutes" && row.virtualDestinations && row.virtualDestinations.length > 0) {
+            updatedItem.virtualDestinations = distributeVolumeToVirtualDestinations(value, row.virtualDestinations);
+          }
+          return updatedItem;
         }
         return row;
       });
@@ -600,14 +713,60 @@ export default function App() {
     });
   };
 
+  // Virtual destinations specific inline update handlers
+  const updateInboundVirtualValue = (rowId: string, virtualId: string, field: "plannedMinutes" | "rate", value: number) => {
+    setInboundRows(prev => prev.map(row => {
+      if (row.id === rowId && row.virtualDestinations) {
+        const nextVirtuals = row.virtualDestinations.map(v => 
+          v.id === virtualId ? { ...v, [field]: value } : v
+        );
+        const nextMins = nextVirtuals.reduce((sum, v) => sum + v.plannedMinutes, 0);
+        return {
+          ...row,
+          plannedMinutes: nextMins,
+          virtualDestinations: nextVirtuals
+        };
+      }
+      return row;
+    }));
+  };
+
+  const updateOutboundVirtualValue = (rowId: string, virtualId: string, field: "plannedMinutes" | "rate", value: number) => {
+    setOutboundRows(prev => prev.map(row => {
+      if (row.id === rowId && row.virtualDestinations) {
+        const nextVirtuals = row.virtualDestinations.map(v => 
+          v.id === virtualId ? { ...v, [field]: value } : v
+        );
+        const nextMins = nextVirtuals.reduce((sum, v) => sum + v.plannedMinutes, 0);
+        return {
+          ...row,
+          plannedMinutes: nextMins,
+          virtualDestinations: nextVirtuals
+        };
+      }
+      return row;
+    }));
+  };
+
   // Edit Modal form submits
   const handleSaveInboundEdit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingInbound) return;
 
     setInboundRows(prevInbound => {
+      const oldRow = prevInbound.find(r => r.id === editingInbound.id);
+      let updatedRow = { ...editingInbound };
+      if (oldRow && oldRow.virtualDestinations && oldRow.virtualDestinations.length > 0) {
+        if (oldRow.plannedMinutes !== editingInbound.plannedMinutes) {
+          updatedRow.virtualDestinations = distributeVolumeToVirtualDestinations(
+            editingInbound.plannedMinutes,
+            oldRow.virtualDestinations
+          );
+        }
+      }
+
       const mainUpdatedInbound = prevInbound.map(row => 
-        row.id === editingInbound.id ? editingInbound : row
+        row.id === editingInbound.id ? updatedRow : row
       );
 
       if (editingInbound.isMasked) {
@@ -627,8 +786,19 @@ export default function App() {
     if (!editingOutbound) return;
 
     setOutboundRows(prevOutbound => {
+      const oldRow = prevOutbound.find(r => r.id === editingOutbound.id);
+      let updatedRow = { ...editingOutbound };
+      if (oldRow && oldRow.virtualDestinations && oldRow.virtualDestinations.length > 0) {
+        if (oldRow.plannedMinutes !== editingOutbound.plannedMinutes) {
+          updatedRow.virtualDestinations = distributeVolumeToVirtualDestinations(
+            editingOutbound.plannedMinutes,
+            oldRow.virtualDestinations
+          );
+        }
+      }
+
       const mainUpdatedOutbound = prevOutbound.map(row => 
-        row.id === editingOutbound.id ? editingOutbound : row
+        row.id === editingOutbound.id ? updatedRow : row
       );
 
       if (editingOutbound.isMasked) {
@@ -669,30 +839,62 @@ export default function App() {
   // Shows only masked destinations with no replicas
   const displayedInboundRows = useMemo(() => {
     const maskedOnly = inboundRows.filter(row => row.isMasked);
-    const seenNames = new Set<string>();
-    const uniqueRows: InboundRow[] = [];
+    const nameToRowMap = new Map<string, InboundRow>();
+
     maskedOnly.forEach(row => {
-      const name = getDisplayMaskedName(row).trim().toLowerCase();
-      if (!seenNames.has(name)) {
-        seenNames.add(name);
-        uniqueRows.push(row);
+      const nameSpec = getDisplayMaskedName(row).trim();
+      const lowerName = nameSpec.toLowerCase();
+      if (!nameToRowMap.has(lowerName)) {
+        // Deep clone first item so the base row reference properties are unmodified
+        nameToRowMap.set(lowerName, { ...row, plannedMinutes: 0 });
+      }
+      const existing = nameToRowMap.get(lowerName)!;
+      existing.plannedMinutes += row.plannedMinutes;
+
+      // Accruing virtual destinations if duplicated parent row has nested virtual arrays
+      if (row.virtualDestinations && row.virtualDestinations.length > 0) {
+        if (!existing.virtualDestinations) {
+          existing.virtualDestinations = [];
+        }
+        row.virtualDestinations.forEach(v => {
+          if (!existing.virtualDestinations!.some(ev => ev.destination === v.destination)) {
+            existing.virtualDestinations!.push({ ...v });
+          }
+        });
       }
     });
-    return uniqueRows;
+
+    return Array.from(nameToRowMap.values());
   }, [inboundRows]);
 
   const displayedOutboundRows = useMemo(() => {
     const maskedOnly = outboundRows.filter(row => row.isMasked);
-    const seenNames = new Set<string>();
-    const uniqueRows: OutboundRow[] = [];
+    const nameToRowMap = new Map<string, OutboundRow>();
+
     maskedOnly.forEach(row => {
-      const name = getDisplayMaskedName(row).trim().toLowerCase();
-      if (!seenNames.has(name)) {
-        seenNames.add(name);
-        uniqueRows.push(row);
+      const nameSpec = getDisplayMaskedName(row).trim();
+      const lowerName = nameSpec.toLowerCase();
+      if (!nameToRowMap.has(lowerName)) {
+        // Deep clone first item so the base row reference properties are unmodified
+        nameToRowMap.set(lowerName, { ...row, plannedMinutes: 0 });
+      }
+      const existing = nameToRowMap.get(lowerName)!;
+      existing.plannedMinutes += row.plannedMinutes;
+
+      // Accruing virtual destinations if duplicated parent row has nested virtual arrays
+      if (row.virtualDestinations && row.virtualDestinations.length > 0) {
+        if (!existing.virtualDestinations) {
+          existing.virtualDestinations = [];
+        }
+        row.virtualDestinations.forEach(v => {
+          if (!existing.virtualDestinations!.some(ev => ev.destination === v.destination)) {
+            existing.virtualDestinations!.push({ ...v });
+          }
+        });
       }
     });
-    return uniqueRows;
+
+    return Array.from(nameToRowMap.values());
   }, [outboundRows]);
 
   // Live summations and key stats calculations
@@ -705,8 +907,13 @@ export default function App() {
       const mins = Math.max(0, Number(row.plannedMinutes) || 0);
       const rpm = Math.max(0, Number(row.rpm) || 0);
       totalInboundMinutes += mins;
-      // Equation: Planned Revenue = Planned Minutes * RPM
-      totalPlannedRevenue += (mins * rpm);
+      if (row.virtualDestinations && row.virtualDestinations.length > 0) {
+        row.virtualDestinations.forEach(v => {
+          totalPlannedRevenue += (v.plannedMinutes * v.rate);
+        });
+      } else {
+        totalPlannedRevenue += (mins * rpm);
+      }
     });
 
     // Outbound calculations
@@ -717,8 +924,13 @@ export default function App() {
       const mins = Math.max(0, Number(row.plannedMinutes) || 0);
       const cpm = Math.max(0, Number(row.cpm) || 0);
       totalOutboundMinutes += mins;
-      // Equation: Planned Cost = Planned Minutes * CPM
-      totalPlannedCost += (mins * cpm);
+      if (row.virtualDestinations && row.virtualDestinations.length > 0) {
+        row.virtualDestinations.forEach(v => {
+          totalPlannedCost += (v.plannedMinutes * v.rate);
+        });
+      } else {
+        totalPlannedCost += (mins * cpm);
+      }
     });
 
     const netMargin = totalPlannedRevenue - totalPlannedCost;
@@ -1125,92 +1337,132 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* Render destinations preview block with custom selection & masking controllers */}
-                      <div className="space-y-2 border border-slate-200/60 bg-white/50 p-4 rounded-xl">
-                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pb-2 border-b border-slate-150">
-                          <div>
-                            <span className="block text-xs font-bold text-slate-705 text-slate-700 uppercase tracking-widest font-mono">
-                              Configure Individual Route Masking Status
-                            </span>
-                            <span className="block text-[11px] text-slate-400 mt-0.5">
-                              Check an item to include it in the <strong className="text-emerald-600">Unmasked List</strong>. Leave unchecked to keep <strong className="text-amber-600">Masked</strong>.
-                            </span>
-                          </div>
-                          
-                          {/* Bulk Actions */}
-                          <div className="flex gap-1.5 shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => setUnmaskedIndices(parsedDestinations.map((_, i) => i))}
-                              className="px-2.5 py-1 text-[10px] font-bold text-slate-600 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition-all cursor-pointer shadow-2xs"
-                            >
-                              Select All Unmasked
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setUnmaskedIndices([])}
-                              className="px-2.5 py-1 text-[10px] font-bold text-slate-600 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition-all cursor-pointer shadow-2xs"
-                            >
-                              Deselect (All Masked)
-                            </button>
-                          </div>
+                      {/* Virtual Destination Locking Section */}
+                      <div className="bg-indigo-50/50 rounded-xl border border-indigo-150 p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <label className="flex items-center gap-2 font-bold text-xs uppercase tracking-wider text-indigo-950 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={groupAsVirtual}
+                              onChange={(e) => setGroupAsVirtual(e.target.checked)}
+                              className="rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500 h-4 w-4 cursor-pointer"
+                            />
+                            <span>Lock with 1 Masked Destination Parent Group (Virtual Destinations)</span>
+                          </label>
+                          <span className="text-[10px] bg-indigo-100 text-indigo-750 px-2 py-0.5 rounded-full font-bold font-mono tracking-wide uppercase">
+                            RECOMMENDED
+                          </span>
                         </div>
+                        
+                        <p className="text-xs text-indigo-700/80 leading-relaxed">
+                          When checked, the entire spreadsheet of {parsedDestinations.length} routes are imported as <strong>Virtual Destinations</strong> locked under a single parent Masked Destination. The parent's total volume is locked equal to the sum of its virtual components, and distributing volume dynamically maintains this mathematical equality.
+                        </p>
 
-                        <div className="max-h-56 overflow-y-auto divide-y divide-slate-100 pr-1.5 scrollbar-thin">
-                          {parsedDestinations.map((dest, i) => {
-                            const isUnmasked = unmaskedIndices.includes(i);
-                            return (
-                              <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-2 text-xs">
-                                {/* Left side: Index, Checkbox and raw name */}
-                                <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                                  <span className="font-mono text-[10px] text-slate-400 w-11 shrink-0">Row {i + 1}</span>
-                                  
-                                  <label className="flex items-center gap-2 cursor-pointer select-none min-w-0">
-                                    <input
-                                      type="checkbox"
-                                      className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5 cursor-pointer focus:outline-hidden"
-                                      checked={isUnmasked}
-                                      onChange={(e) => {
-                                        if (e.target.checked) {
-                                          setUnmaskedIndices(prev => [...prev, i]);
-                                        } else {
-                                          setUnmaskedIndices(prev => prev.filter(idx => idx !== i));
-                                        }
-                                      }}
-                                    />
-                                    <span className={`font-semibold truncate text-slate-750 transition-colors ${isUnmasked ? 'text-slate-900 font-bold' : 'text-slate-400 font-medium'}`} title={dest}>
-                                      {dest}
-                                    </span>
-                                  </label>
-                                </div>
-
-                                {/* Right side: Status and Manual Mask Input */}
-                                <div className="flex items-center gap-2 shrink-0 sm:w-72 justify-end">
-                                  {isUnmasked ? (
-                                    <span className="px-2 py-0.5 text-[9px] font-bold font-mono tracking-wider uppercase rounded bg-emerald-50 text-emerald-700 border border-emerald-150 shrink-0">
-                                      Unmasked
-                                    </span>
-                                  ) : (
-                                    <div className="flex items-center gap-1.5 w-full">
-                                      <span className="px-2 py-0.5 text-[9px] font-bold font-mono tracking-wider uppercase rounded bg-amber-50 text-amber-700 border border-amber-150 shrink-0">
-                                        Masked
-                                      </span>
-                                      <input
-                                        type="text"
-                                        value={customMaskedNames[i] || ""}
-                                        onChange={(e) => setCustomMaskedNames(prev => ({ ...prev, [i]: e.target.value }))}
-                                        placeholder={maskDestination(dest) || "Manual masked label..."}
-                                        className="w-full bg-slate-50 hover:bg-white focus:bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded px-2.5 py-0.5 text-[11px] font-mono transition-all text-slate-800 placeholder:text-slate-400 focus:outline-hidden"
-                                        title="Manually key in masked name"
-                                      />
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
+                        {groupAsVirtual && (
+                          <div className="pt-2 max-w-md">
+                            <label className="block text-[11px] font-bold text-indigo-950 uppercase tracking-wider mb-1">
+                              Parent Masked Destination Name (Alias)
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              value={virtualGroupName}
+                              onChange={(e) => setVirtualGroupName(e.target.value)}
+                              placeholder="e.g. UK Mobiles Virtual Group"
+                              className="w-full bg-white border border-indigo-200 focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 rounded-lg px-3 py-1.5 font-sans text-xs transition-colors text-slate-900 placeholder:text-slate-400 focus:outline-hidden font-semibold"
+                            />
+                          </div>
+                        )}
                       </div>
+
+                      {/* Render destinations preview block with custom selection & masking controllers */}
+                      {!groupAsVirtual && (
+                        <div className="space-y-2 border border-slate-200/60 bg-white/50 p-4 rounded-xl">
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pb-2 border-b border-slate-150">
+                            <div>
+                              <span className="block text-xs font-bold text-slate-705 text-slate-700 uppercase tracking-widest font-mono">
+                                Configure Individual Route Masking Status
+                              </span>
+                              <span className="block text-[11px] text-slate-400 mt-0.5">
+                                Check an item to include it in the <strong className="text-emerald-600">Unmasked List</strong>. Leave unchecked to keep <strong className="text-amber-600">Masked</strong>.
+                              </span>
+                            </div>
+                            
+                            {/* Bulk Actions */}
+                            <div className="flex gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => setUnmaskedIndices(parsedDestinations.map((_, i) => i))}
+                                className="px-2.5 py-1 text-[10px] font-bold text-slate-600 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition-all cursor-pointer shadow-2xs"
+                              >
+                                Select All Unmasked
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setUnmaskedIndices([])}
+                                className="px-2.5 py-1 text-[10px] font-bold text-slate-600 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition-all cursor-pointer shadow-2xs"
+                              >
+                                Deselect (All Masked)
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="max-h-56 overflow-y-auto divide-y divide-slate-100 pr-1.5 scrollbar-thin">
+                            {parsedDestinations.map((dest, i) => {
+                              const isUnmasked = unmaskedIndices.includes(i);
+                              return (
+                                <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 py-2 text-xs">
+                                  {/* Left side: Index, Checkbox and raw name */}
+                                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                    <span className="font-mono text-[10px] text-slate-400 w-11 shrink-0">Row {i + 1}</span>
+                                    
+                                    <label className="flex items-center gap-2 cursor-pointer select-none min-w-0">
+                                      <input
+                                        type="checkbox"
+                                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5 cursor-pointer focus:outline-hidden"
+                                        checked={isUnmasked}
+                                        onChange={(e) => {
+                                          if (e.target.checked) {
+                                            setUnmaskedIndices(prev => [...prev, i]);
+                                          } else {
+                                            setUnmaskedIndices(prev => prev.filter(idx => idx !== i));
+                                          }
+                                        }}
+                                      />
+                                      <span className={`font-semibold truncate text-slate-750 transition-colors ${isUnmasked ? 'text-slate-900 font-bold' : 'text-slate-400 font-medium'}`} title={dest}>
+                                        {dest}
+                                      </span>
+                                    </label>
+                                  </div>
+
+                                  {/* Right side: Status and Manual Mask Input */}
+                                  <div className="flex items-center gap-2 shrink-0 sm:w-72 justify-end">
+                                    {isUnmasked ? (
+                                      <span className="px-2 py-0.5 text-[9px] font-bold font-mono tracking-wider uppercase rounded bg-emerald-50 text-emerald-700 border border-emerald-150 shrink-0">
+                                        Unmasked
+                                      </span>
+                                    ) : (
+                                      <div className="flex items-center gap-1.5 w-full">
+                                        <span className="px-2 py-0.5 text-[9px] font-bold font-mono tracking-wider uppercase rounded bg-amber-50 text-amber-700 border border-amber-150 shrink-0">
+                                          Masked
+                                        </span>
+                                        <input
+                                          type="text"
+                                          value={customMaskedNames[i] || ""}
+                                          onChange={(e) => setCustomMaskedNames(prev => ({ ...prev, [i]: e.target.value }))}
+                                          placeholder={maskDestination(dest) || "Manual masked label..."}
+                                          className="w-full bg-slate-50 hover:bg-white focus:bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded px-2.5 py-0.5 text-[11px] font-mono transition-all text-slate-800 placeholder:text-slate-400 focus:outline-hidden"
+                                          title="Manually key in masked name"
+                                        />
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
 
                       {/* Commit Excel Data to React state */}
                       <div className="flex justify-end gap-2 pt-2">
@@ -1328,123 +1580,233 @@ export default function App() {
                       </motion.tr>
                     ) : (
                       displayedInboundRows.map((row, idx) => {
-                        const plannedRevenue = row.plannedMinutes * row.rpm;
+                        const rowHasVirtuals = !!(row.virtualDestinations && row.virtualDestinations.length > 0);
+                        const isExpanded = !!expandedRows[row.id];
+                        let plannedRevenue = 0;
+                        if (rowHasVirtuals) {
+                          plannedRevenue = row.virtualDestinations!.reduce((sum, v) => sum + (v.plannedMinutes * v.rate), 0);
+                        } else {
+                          plannedRevenue = row.plannedMinutes * row.rpm;
+                        }
+
                         return (
-                          <motion.tr
-                            key={row.id}
-                            initial={{ opacity: 0, y: 15 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, x: -15, transition: { duration: 0.15 } }}
-                            transition={{ duration: 0.15 }}
-                            className="hover:bg-slate-50/80 text-sm align-middle group"
-                          >
-                            {/* Counter Index */}
-                            <td className="py-2 px-3 text-center text-xs font-mono text-slate-400">
-                              {idx + 1}
-                            </td>
+                          <React.Fragment key={row.id}>
+                            <motion.tr
+                              initial={{ opacity: 0, y: 15 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, x: -15, transition: { duration: 0.15 } }}
+                              transition={{ duration: 0.15 }}
+                              className="hover:bg-slate-50/80 text-sm align-middle group border-b border-slate-150"
+                            >
+                              {/* Counter Index & Expand toggler */}
+                              <td className="py-2 px-3 text-center text-xs font-mono text-slate-400">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  {rowHasVirtuals && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setExpandedRows(prev => ({ ...prev, [row.id]: !prev[row.id] }))}
+                                      title={isExpanded ? "Collapse Locked Virtual Destinations" : "Expand Locked Virtual Destinations"}
+                                      className="p-1 text-indigo-650 bg-indigo-50 hover:bg-indigo-100 rounded cursor-pointer transition-colors shrink-0 inline-flex items-center justify-center"
+                                    >
+                                      <ChevronDown size={11} className={`transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`} />
+                                    </button>
+                                  )}
+                                  <span>{idx + 1}</span>
+                                </div>
+                              </td>
 
-                            {/* Destination Input (Clearly demarcated form fields) */}
-                            <td className="py-2 px-2">
-                              <div className="flex items-center gap-1 animate-fade-in">
-                                {row.isMasked ? (
+                              {/* Destination Input (Clearly demarcated form fields) */}
+                              <td className="py-2 px-2">
+                                <div className="flex items-center gap-1 animate-fade-in">
+                                  {row.isMasked ? (
+                                    <input
+                                      type="text"
+                                      value={row.maskedName || ""}
+                                      onChange={(e) => updateInboundValue(row.id, "maskedName", e.target.value)}
+                                      placeholder={maskDestination(row.destination) || "Enter custom masked alias..."}
+                                      className="w-full bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-emerald-500 rounded border border-slate-200 hover:border-slate-300 px-2.5 py-1 text-xs transition-all focus:border-emerald-500 font-medium placeholder:text-slate-400 focus:outline-hidden"
+                                      title="Edit Manual Masked Destination Name (Optional)"
+                                    />
+                                  ) : (
+                                    <input
+                                      type="text"
+                                      value={row.destination}
+                                      onChange={(e) => updateInboundValue(row.id, "destination", e.target.value)}
+                                      placeholder="Destination location..."
+                                      className="w-full bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-emerald-500 rounded border border-slate-200 hover:border-slate-300 px-2.5 py-1 text-xs transition-all focus:border-emerald-500 font-medium placeholder:text-slate-300 focus:outline-hidden"
+                                      title="Edit destination location"
+                                    />
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => updateInboundValue(row.id, "isMasked", !row.isMasked)}
+                                    title={row.isMasked ? "Click to Reveal Raw" : "Click to Mask Value"}
+                                    className="p-1 px-1.5 text-slate-400 hover:text-slate-600 rounded border border-slate-200 bg-white hover:bg-slate-50 shrink-0 transition-all cursor-pointer"
+                                  >
+                                    {row.isMasked ? <Lock size={12} className="text-emerald-500" /> : <Unlock size={12} />}
+                                  </button>
+                                </div>
+                              </td>
+
+                              {/* Planned Minutes Input */}
+                              <td className="py-2 px-2">
+                                <div className="relative flex items-center justify-end">
                                   <input
-                                    type="text"
-                                    value={row.maskedName || ""}
-                                    onChange={(e) => updateInboundValue(row.id, "maskedName", e.target.value)}
-                                    placeholder={maskDestination(row.destination) || "Enter custom masked alias..."}
-                                    className="w-full bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-emerald-500 rounded border border-slate-200 hover:border-slate-300 px-2.5 py-1 text-xs transition-all focus:border-emerald-500 font-medium placeholder:text-slate-400 focus:outline-hidden"
-                                    title="Edit Manual Masked Destination Name (Optional)"
+                                    type="number"
+                                    min="0"
+                                    disabled={row.isVolumeLocked}
+                                    value={row.plannedMinutes === 0 ? "" : row.plannedMinutes}
+                                    onChange={(e) => updateInboundValue(row.id, "plannedMinutes", Math.max(0, parseInt(e.target.value) || 0))}
+                                    placeholder="0"
+                                    className={`w-full font-mono text-xs text-right pr-6 pl-2 py-1 rounded transition-all focus:outline-hidden ${
+                                      row.isVolumeLocked
+                                        ? "bg-slate-100/85 text-slate-500 border border-slate-250 cursor-not-allowed font-semibold animate-pulse-subtle"
+                                        : "bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-emerald-500 border border-slate-200 hover:border-slate-300 focus:border-emerald-500"
+                                    }`}
+                                    title={row.isVolumeLocked ? "Volume is locked to this masked destination" : "Edit Planned Minutes"}
                                   />
-                                ) : (
+                                  {row.isVolumeLocked && (
+                                    <span className="absolute right-1.5 text-amber-500" title="Locked to Masked Destination Volume">
+                                      <Lock size={10} />
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+
+                              {/* RPM Input (Rate Per Minute) */}
+                              <td className="py-2 px-2">
+                                <div className="relative">
+                                  <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[9px] text-slate-400 font-mono">$</span>
                                   <input
-                                    type="text"
-                                    value={row.destination}
-                                    onChange={(e) => updateInboundValue(row.id, "destination", e.target.value)}
-                                    placeholder="Destination location..."
-                                    className="w-full bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-emerald-500 rounded border border-slate-200 hover:border-slate-300 px-2.5 py-1 text-xs transition-all focus:border-emerald-500 font-medium placeholder:text-slate-300 focus:outline-hidden"
-                                    title="Edit destination location"
+                                    type="number"
+                                    min="0"
+                                    step="0.0001"
+                                    disabled={rowHasVirtuals}
+                                    value={rowHasVirtuals ? "" : (row.rpm === 0 ? "" : row.rpm)}
+                                    onChange={(e) => updateInboundValue(row.id, "rpm", Math.max(0, parseFloat(e.target.value) || 0))}
+                                    placeholder={rowHasVirtuals ? "Mixed" : "0.0000"}
+                                    className="w-full font-mono text-xs text-right bg-slate-50 disabled:bg-slate-100/70 disabled:text-slate-400 disabled:cursor-not-allowed hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-emerald-500 rounded border border-slate-200 hover:border-slate-300 pl-4 pr-1.5 py-1 transition-all focus:border-emerald-500 focus:outline-hidden"
+                                    title={rowHasVirtuals ? "Computed from nested virtual destinations rate" : "Edit Revenue Per Minute (RPM)"}
                                   />
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() => updateInboundValue(row.id, "isMasked", !row.isMasked)}
-                                  title={row.isMasked ? "Click to Reveal Raw" : "Click to Mask Value"}
-                                  className="p-1 px-1.5 text-slate-400 hover:text-slate-600 rounded border border-slate-200 bg-white hover:bg-slate-50 shrink-0 transition-all cursor-pointer"
-                                >
-                                  {row.isMasked ? <Lock size={12} className="text-emerald-500" /> : <Unlock size={12} />}
-                                </button>
-                              </div>
-                            </td>
+                                </div>
+                              </td>
 
-                            {/* Planned Minutes Input */}
-                            <td className="py-2 px-2">
-                              <div className="relative flex items-center justify-end">
-                                <input
-                                  type="number"
-                                  min="0"
-                                  disabled={row.isVolumeLocked}
-                                  value={row.plannedMinutes === 0 ? "" : row.plannedMinutes}
-                                  onChange={(e) => updateInboundValue(row.id, "plannedMinutes", Math.max(0, parseInt(e.target.value) || 0))}
-                                  placeholder="0"
-                                  className={`w-full font-mono text-xs text-right pr-6 pl-2 py-1 rounded transition-all focus:outline-hidden ${
-                                    row.isVolumeLocked
-                                      ? "bg-slate-100/80 text-slate-400 border border-slate-250 cursor-not-allowed font-semibold"
-                                      : "bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-emerald-500 border border-slate-200 hover:border-slate-300 focus:border-emerald-500"
-                                  }`}
-                                  title={row.isVolumeLocked ? "Volume is locked to this masked destination" : "Edit Planned Minutes"}
-                                />
-                                {row.isVolumeLocked && (
-                                  <span className="absolute right-1.5 text-amber-500" title="Locked to Masked Destination">
-                                    <Lock size={10} className="animate-pulse" />
-                                  </span>
-                                )}
-                              </div>
-                            </td>
+                              {/* Automatically Calculated Planned Revenue Result */}
+                              <td className="py-2 px-3 text-right font-mono font-semibold text-slate-800 text-xs">
+                                ${plannedRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
 
-                            {/* RPM Input (Rate Per Minute) */}
-                            <td className="py-2 px-2">
-                              <div className="relative">
-                                <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[9px] text-slate-400 font-mono">$</span>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="0.0001"
-                                  value={row.rpm === 0 ? "" : row.rpm}
-                                  onChange={(e) => updateInboundValue(row.id, "rpm", Math.max(0, parseFloat(e.target.value) || 0))}
-                                  placeholder="0.0000"
-                                  className="w-full font-mono text-xs text-right bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-emerald-500 rounded border border-slate-200 hover:border-slate-300 pl-4 pr-1.5 py-1 transition-all focus:border-emerald-500 focus:outline-hidden"
-                                  title="Edit Revenue Per Minute (RPM)"
-                                />
-                              </div>
-                            </td>
+                              {/* Actions Column (Delete and Detailed Edit Modal trigger) */}
+                              <td className="py-2 px-3 text-center">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingInbound(row)}
+                                    className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded border border-slate-100 bg-white transition-colors cursor-pointer"
+                                    title="Edit in full interactive modal form"
+                                  >
+                                    <Pencil size={12} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => deleteInboundRow(row.id)}
+                                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded border border-slate-100 bg-white transition-colors cursor-pointer"
+                                    title="Delete Inbound row"
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
+                                </div>
+                              </td>
+                            </motion.tr>
 
-                            {/* Automatically Calculated Planned Revenue Result */}
-                            <td className="py-2 px-3 text-right font-mono font-semibold text-slate-800 text-xs">
-                              ${plannedRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </td>
+                            {/* Collapsible Virtual Destination list */}
+                            {isExpanded && row.virtualDestinations && row.virtualDestinations.length > 0 && (
+                              <tr className="bg-indigo-50/5/30 border-b border-indigo-100">
+                                <td colSpan={6} className="p-0 bg-indigo-50/5">
+                                  <div className="pl-9 pr-4 py-3 border-l-4 border-indigo-500 bg-indigo-50/10 space-y-2">
+                                    <div className="flex items-center justify-between pb-1.5 border-b border-indigo-100">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-[10px] bg-indigo-600 text-white px-2 py-0.5 rounded-sm font-bold tracking-wider font-mono">
+                                          LOCKED VIRTUAL GROUP
+                                        </span>
+                                        <span className="text-xs text-slate-500 font-medium">
+                                          Parent: <strong className="text-indigo-900">{getDisplayMaskedName(row)}</strong>
+                                        </span>
+                                      </div>
+                                      <span className="text-[11px] font-mono text-indigo-700/90 font-bold bg-indigo-50 px-2 py-0.5 rounded">
+                                        Vol Sum: {row.plannedMinutes.toLocaleString()} / {row.plannedMinutes.toLocaleString()} mins (100% matched)
+                                      </span>
+                                    </div>
 
-                            {/* Actions Column (Delete and Detailed Edit Modal trigger) */}
-                            <td className="py-2 px-3 text-center">
-                              <div className="flex items-center justify-center gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => setEditingInbound(row)}
-                                  className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded border border-slate-100 bg-white transition-colors cursor-pointer"
-                                  title="Edit in full interactive modal form"
-                                >
-                                  <Pencil size={12} />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => deleteInboundRow(row.id)}
-                                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded border border-slate-100 bg-white transition-colors cursor-pointer"
-                                  title="Delete Inbound row"
-                                >
-                                  <Trash2 size={12} />
-                                </button>
-                              </div>
-                            </td>
-                          </motion.tr>
+                                    <div className="border border-indigo-100/80 rounded-lg overflow-hidden bg-white shadow-xs">
+                                      <table className="w-full text-left border-collapse">
+                                        <thead>
+                                          <tr className="border-b border-indigo-100 text-[9px] font-bold text-indigo-850 bg-indigo-50/20 uppercase font-mono tracking-wider">
+                                            <th className="py-1.5 px-3">Virtual Route Name</th>
+                                            <th className="py-1.5 px-3 text-right w-36">Volume (Mins)</th>
+                                            <th className="py-1.5 px-3 text-right w-36">Rate ($/min)</th>
+                                            <th className="py-1.5 px-3 text-right w-36">Revenue rollup</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-indigo-50/50">
+                                          {row.virtualDestinations.map((v) => {
+                                            const vRev = v.plannedMinutes * v.rate;
+                                            return (
+                                              <tr key={v.id} className="text-xs hover:bg-indigo-50/15">
+                                                <td className="py-1 px-3">
+                                                  <input
+                                                    type="text"
+                                                    value={v.destination}
+                                                    onChange={(e) => {
+                                                      const nVirt = row.virtualDestinations!.map(cur => cur.id === v.id ? { ...cur, destination: e.target.value } : cur);
+                                                      setInboundRows(prev => prev.map(r => r.id === row.id ? { ...r, virtualDestinations: nVirt } : r));
+                                                    }}
+                                                    className="w-full bg-slate-50/30 hover:bg-white focus:bg-white text-slate-800 border-none rounded px-2 py-0.5 text-xs transition-colors focus:ring-1 focus:ring-indigo-500 font-medium font-mono"
+                                                    title="Modify locked virtual destination trunk suffix"
+                                                  />
+                                                </td>
+                                                <td className="py-1 px-3">
+                                                  <input
+                                                    type="number"
+                                                    min="0"
+                                                    value={v.plannedMinutes === 0 ? "" : v.plannedMinutes}
+                                                    onChange={(e) => {
+                                                      const val = Math.max(0, parseInt(e.target.value) || 0);
+                                                      updateInboundVirtualValue(row.id, v.id, "plannedMinutes", val);
+                                                    }}
+                                                    className="w-full font-mono text-right bg-slate-50/30 hover:bg-white focus:bg-white text-slate-800 border-none rounded px-2 py-0.5 text-xs focus:ring-1 focus:ring-indigo-500 font-semibold"
+                                                  />
+                                                </td>
+                                                <td className="py-1 px-3">
+                                                  <div className="relative">
+                                                    <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[9px] text-slate-400 font-mono">$</span>
+                                                    <input
+                                                      type="number"
+                                                      min="0"
+                                                      step="0.0001"
+                                                      value={v.rate === 0 ? "" : v.rate}
+                                                      onChange={(e) => {
+                                                        const val = Math.max(0, parseFloat(e.target.value) || 0);
+                                                        updateInboundVirtualValue(row.id, v.id, "rate", val);
+                                                      }}
+                                                      className="w-full font-mono text-right bg-slate-50/30 hover:bg-white focus:bg-white text-slate-800 border-none rounded pl-4 pr-1.5 py-0.5 text-xs focus:ring-1 focus:ring-indigo-500"
+                                                    />
+                                                  </div>
+                                                </td>
+                                                <td className="py-1 px-3 text-right font-mono text-indigo-950 font-bold">
+                                                  ${vRev.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                </td>
+                                              </tr>
+                                            );
+                                          })}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
                         );
                       })
                     )}
@@ -1559,123 +1921,233 @@ export default function App() {
                       </motion.tr>
                     ) : (
                       displayedOutboundRows.map((row, idx) => {
-                        const plannedCost = row.plannedMinutes * row.cpm;
+                        const rowHasVirtuals = !!(row.virtualDestinations && row.virtualDestinations.length > 0);
+                        const isExpanded = !!expandedRows[row.id];
+                        let plannedCost = 0;
+                        if (rowHasVirtuals) {
+                          plannedCost = row.virtualDestinations!.reduce((sum, v) => sum + (v.plannedMinutes * v.rate), 0);
+                        } else {
+                          plannedCost = row.plannedMinutes * row.cpm;
+                        }
+
                         return (
-                          <motion.tr
-                            key={row.id}
-                            initial={{ opacity: 0, y: 15 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, x: 15, transition: { duration: 0.15 } }}
-                            transition={{ duration: 0.15 }}
-                            className="hover:bg-slate-50/80 text-sm align-middle group"
-                          >
-                            {/* Counter Index */}
-                            <td className="py-2 px-3 text-center text-xs font-mono text-slate-400">
-                              {idx + 1}
-                            </td>
+                          <React.Fragment key={row.id}>
+                            <motion.tr
+                              initial={{ opacity: 0, y: 15 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, x: 15, transition: { duration: 0.15 } }}
+                              transition={{ duration: 0.15 }}
+                              className="hover:bg-slate-50/80 text-sm align-middle group border-b border-slate-150"
+                            >
+                              {/* Counter Index & Expand toggler */}
+                              <td className="py-2 px-3 text-center text-xs font-mono text-slate-400">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  {rowHasVirtuals && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setExpandedRows(prev => ({ ...prev, [row.id]: !prev[row.id] }))}
+                                      title={isExpanded ? "Collapse Locked Virtual Destinations" : "Expand Locked Virtual Destinations"}
+                                      className="p-1 text-amber-655 text-amber-600 bg-amber-50 hover:bg-amber-100 rounded cursor-pointer transition-colors shrink-0 inline-flex items-center justify-center"
+                                    >
+                                      <ChevronDown size={11} className={`transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`} />
+                                    </button>
+                                  )}
+                                  <span>{idx + 1}</span>
+                                </div>
+                              </td>
 
-                            {/* Destination Input (Clearly demarcated form fields) */}
-                            <td className="py-2 px-2">
-                              <div className="flex items-center gap-1 animate-fade-in">
-                                {row.isMasked ? (
+                              {/* Destination Input (Clearly demarcated form fields) */}
+                              <td className="py-2 px-2">
+                                <div className="flex items-center gap-1 animate-fade-in">
+                                  {row.isMasked ? (
+                                    <input
+                                      type="text"
+                                      value={row.maskedName || ""}
+                                      onChange={(e) => updateOutboundValue(row.id, "maskedName", e.target.value)}
+                                      placeholder={maskDestination(row.destination) || "Enter custom masked alias..."}
+                                      className="w-full bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-amber-500 rounded border border-slate-200 hover:border-slate-300 px-2.5 py-1 text-xs transition-all focus:border-amber-500 font-medium placeholder:text-slate-400 focus:outline-hidden"
+                                      title="Edit Manual Masked Destination Name (Optional)"
+                                    />
+                                  ) : (
+                                    <input
+                                      type="text"
+                                      value={row.destination}
+                                      onChange={(e) => updateOutboundValue(row.id, "destination", e.target.value)}
+                                      placeholder="Destination location..."
+                                      className="w-full bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-amber-500 rounded border border-slate-200 hover:border-slate-300 px-2.5 py-1 text-xs transition-all focus:border-amber-500 font-medium placeholder:text-slate-300 focus:outline-hidden"
+                                      title="Edit destination location"
+                                    />
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => updateOutboundValue(row.id, "isMasked", !row.isMasked)}
+                                    title={row.isMasked ? "Click to Reveal Raw" : "Click to Mask Value"}
+                                    className="p-1 px-1.5 text-slate-400 hover:text-slate-600 rounded border border-slate-200 bg-white hover:bg-slate-50 shrink-0 transition-all cursor-pointer"
+                                  >
+                                    {row.isMasked ? <Lock size={12} className="text-amber-500" /> : <Unlock size={12} />}
+                                  </button>
+                                </div>
+                              </td>
+
+                              {/* Planned Minutes Input */}
+                              <td className="py-2 px-2">
+                                <div className="relative flex items-center justify-end">
                                   <input
-                                    type="text"
-                                    value={row.maskedName || ""}
-                                    onChange={(e) => updateOutboundValue(row.id, "maskedName", e.target.value)}
-                                    placeholder={maskDestination(row.destination) || "Enter custom masked alias..."}
-                                    className="w-full bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-amber-500 rounded border border-slate-200 hover:border-slate-300 px-2.5 py-1 text-xs transition-all focus:border-amber-500 font-medium placeholder:text-slate-400 focus:outline-hidden"
-                                    title="Edit Manual Masked Destination Name (Optional)"
+                                    type="number"
+                                    min="0"
+                                    disabled={row.isVolumeLocked}
+                                    value={row.plannedMinutes === 0 ? "" : row.plannedMinutes}
+                                    onChange={(e) => updateOutboundValue(row.id, "plannedMinutes", Math.max(0, parseInt(e.target.value) || 0))}
+                                    placeholder="0"
+                                    className={`w-full font-mono text-xs text-right pr-6 pl-2 py-1 rounded transition-all focus:outline-hidden ${
+                                      row.isVolumeLocked
+                                        ? "bg-slate-100/85 text-slate-505 text-slate-500 border border-slate-250 cursor-not-allowed font-semibold animate-pulse-subtle"
+                                        : "bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-amber-500 border border-slate-200 hover:border-slate-300 focus:border-amber-500"
+                                    }`}
+                                    title={row.isVolumeLocked ? "Volume is locked to this masked destination" : "Edit Planned Minutes"}
                                   />
-                                ) : (
+                                  {row.isVolumeLocked && (
+                                    <span className="absolute right-1.5 text-amber-500" title="Locked to Masked Destination Volume">
+                                      <Lock size={10} />
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+
+                              {/* CPM Input */}
+                              <td className="py-2 px-2">
+                                <div className="relative">
+                                  <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[9px] text-slate-400 font-mono">$</span>
                                   <input
-                                    type="text"
-                                    value={row.destination}
-                                    onChange={(e) => updateOutboundValue(row.id, "destination", e.target.value)}
-                                    placeholder="Destination location..."
-                                    className="w-full bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-amber-500 rounded border border-slate-200 hover:border-slate-300 px-2.5 py-1 text-xs transition-all focus:border-amber-500 font-medium placeholder:text-slate-300 focus:outline-hidden"
-                                    title="Edit destination location"
+                                    type="number"
+                                    min="0"
+                                    step="0.0001"
+                                    disabled={rowHasVirtuals}
+                                    value={rowHasVirtuals ? "" : (row.cpm === 0 ? "" : row.cpm)}
+                                    onChange={(e) => updateOutboundValue(row.id, "cpm", Math.max(0, parseFloat(e.target.value) || 0))}
+                                    placeholder={rowHasVirtuals ? "Mixed" : "0.0000"}
+                                    className="w-full font-mono text-xs text-right bg-slate-50 disabled:bg-slate-100/70 disabled:text-slate-400 disabled:cursor-not-allowed hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-amber-500 rounded border border-slate-200 hover:border-slate-300 pl-4 pr-1.5 py-1 transition-all focus:border-amber-500 focus:outline-hidden"
+                                    title={rowHasVirtuals ? "Computed from nested virtual destinations rate" : "Edit Cost CPM"}
                                   />
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() => updateOutboundValue(row.id, "isMasked", !row.isMasked)}
-                                  title={row.isMasked ? "Click to Reveal Raw" : "Click to Mask Value"}
-                                  className="p-1 px-1.5 text-slate-400 hover:text-slate-600 rounded border border-slate-200 bg-white hover:bg-slate-50 shrink-0 transition-all cursor-pointer"
-                                >
-                                  {row.isMasked ? <Lock size={12} className="text-amber-500" /> : <Unlock size={12} />}
-                                </button>
-                              </div>
-                            </td>
+                                </div>
+                              </td>
 
-                            {/* Planned Minutes Input */}
-                            <td className="py-2 px-2">
-                              <div className="relative flex items-center justify-end">
-                                <input
-                                  type="number"
-                                  min="0"
-                                  disabled={row.isVolumeLocked}
-                                  value={row.plannedMinutes === 0 ? "" : row.plannedMinutes}
-                                  onChange={(e) => updateOutboundValue(row.id, "plannedMinutes", Math.max(0, parseInt(e.target.value) || 0))}
-                                  placeholder="0"
-                                  className={`w-full font-mono text-xs text-right pr-6 pl-2 py-1 rounded transition-all focus:outline-hidden ${
-                                    row.isVolumeLocked
-                                      ? "bg-slate-100/80 text-slate-400 border border-slate-250 cursor-not-allowed font-semibold"
-                                      : "bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-amber-500 border border-slate-200 hover:border-slate-300 focus:border-amber-500"
-                                  }`}
-                                  title={row.isVolumeLocked ? "Volume is locked to this masked destination" : "Edit Planned Minutes"}
-                                />
-                                {row.isVolumeLocked && (
-                                  <span className="absolute right-1.5 text-amber-550 text-amber-500" title="Locked to Masked Destination">
-                                    <Lock size={10} className="animate-pulse" />
-                                  </span>
-                                )}
-                              </div>
-                            </td>
+                              {/* Automated planned cost product */}
+                              <td className="py-2 px-3 text-right font-mono font-semibold text-slate-800 text-xs">
+                                ${plannedCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
 
-                            {/* Cost Input (CPM Rate) */}
-                            <td className="py-2 px-2">
-                              <div className="relative">
-                                <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[9px] text-slate-400 font-mono">$</span>
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="0.0001"
-                                  value={row.cpm === 0 ? "" : row.cpm}
-                                  onChange={(e) => updateOutboundValue(row.id, "cpm", Math.max(0, parseFloat(e.target.value) || 0))}
-                                  placeholder="0.0000"
-                                  className="w-full font-mono text-xs text-right bg-slate-50 hover:bg-white focus:bg-white text-slate-800 focus:ring-1 focus:ring-amber-500 rounded border-slate-200 hover:border-slate-300 pl-4 pr-1.5 py-1 transition-all focus:border-amber-500 focus:outline-hidden"
-                                  title="Edit Cost Rate (CPM)"
-                                />
-                              </div>
-                            </td>
+                              {/* Actions Column */}
+                              <td className="py-2 px-3 text-center">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingOutbound(row)}
+                                    className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded border border-slate-100 bg-white transition-colors cursor-pointer"
+                                    title="Edit in full interactive modal form"
+                                  >
+                                    <Pencil size={12} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => deleteOutboundRow(row.id)}
+                                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded border border-slate-100 bg-white transition-colors cursor-pointer"
+                                    title="Delete Outbound row"
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
+                                </div>
+                              </td>
+                            </motion.tr>
 
-                            {/* Automated planned cost product */}
-                            <td className="py-2 px-3 text-right font-mono font-semibold text-slate-800 text-xs">
-                              ${plannedCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </td>
+                            {/* Collapsible Virtual Destination list */}
+                            {isExpanded && row.virtualDestinations && row.virtualDestinations.length > 0 && (
+                              <tr className="bg-amber-50/5/30 border-b border-amber-100">
+                                <td colSpan={6} className="p-0 bg-amber-50/5">
+                                  <div className="pl-9 pr-4 py-3 border-l-4 border-amber-500 bg-amber-50/10 space-y-2">
+                                    <div className="flex items-center justify-between pb-1.5 border-b border-amber-100">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-[10px] bg-amber-600 text-white px-2 py-0.5 rounded-sm font-bold tracking-wider font-mono">
+                                          LOCKED VIRTUAL GROUP
+                                        </span>
+                                        <span className="text-xs text-slate-500 font-medium">
+                                          Parent: <strong className="text-amber-900">{getDisplayMaskedName(row)}</strong>
+                                        </span>
+                                      </div>
+                                      <span className="text-[11px] font-mono text-amber-700/90 font-bold bg-amber-55 px-2 py-0.5 rounded">
+                                        Vol Sum: {row.plannedMinutes.toLocaleString()} / {row.plannedMinutes.toLocaleString()} mins (100% matched)
+                                      </span>
+                                    </div>
 
-                            {/* Actions Column */}
-                            <td className="py-2 px-3 text-center">
-                              <div className="flex items-center justify-center gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => setEditingOutbound(row)}
-                                  className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded border border-slate-100 bg-white transition-colors cursor-pointer"
-                                  title="Edit in full interactive modal form"
-                                >
-                                  <Pencil size={12} />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => deleteOutboundRow(row.id)}
-                                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded border border-slate-100 bg-white transition-colors cursor-pointer"
-                                  title="Delete Outbound row"
-                                >
-                                  <Trash2 size={12} />
-                                </button>
-                              </div>
-                            </td>
-                          </motion.tr>
+                                    <div className="border border-amber-100/80 rounded-lg overflow-hidden bg-white shadow-xs">
+                                      <table className="w-full text-left border-collapse">
+                                        <thead>
+                                          <tr className="border-b border-amber-100 text-[9px] font-bold text-amber-850 bg-amber-50/20 uppercase font-mono tracking-wider">
+                                            <th className="py-1.5 px-3">Virtual Route Name</th>
+                                            <th className="py-1.5 px-3 text-right w-36">Volume (Mins)</th>
+                                            <th className="py-1.5 px-3 text-right w-36">Rate ($/min)</th>
+                                            <th className="py-1.5 px-3 text-right w-36">Cost rollup</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-amber-50/50">
+                                          {row.virtualDestinations.map((v) => {
+                                            const vRev = v.plannedMinutes * v.rate;
+                                            return (
+                                              <tr key={v.id} className="text-xs hover:bg-amber-50/15">
+                                                <td className="py-1 px-3">
+                                                  <input
+                                                    type="text"
+                                                    value={v.destination}
+                                                    onChange={(e) => {
+                                                      const nVirt = row.virtualDestinations!.map(cur => cur.id === v.id ? { ...cur, destination: e.target.value } : cur);
+                                                      setOutboundRows(prev => prev.map(r => r.id === row.id ? { ...r, virtualDestinations: nVirt } : r));
+                                                    }}
+                                                    className="w-full bg-slate-50/30 hover:bg-white focus:bg-white text-slate-800 border-none rounded px-2 py-0.5 text-xs transition-colors focus:ring-1 focus:ring-amber-500 font-medium font-mono"
+                                                    title="Modify locked virtual destination trunk suffix"
+                                                  />
+                                                </td>
+                                                <td className="py-1 px-3">
+                                                  <input
+                                                    type="number"
+                                                    min="0"
+                                                    value={v.plannedMinutes === 0 ? "" : v.plannedMinutes}
+                                                    onChange={(e) => {
+                                                      const val = Math.max(0, parseInt(e.target.value) || 0);
+                                                      updateOutboundVirtualValue(row.id, v.id, "plannedMinutes", val);
+                                                    }}
+                                                    className="w-full font-mono text-right bg-slate-50/30 hover:bg-white focus:bg-white text-slate-800 border-none rounded px-2 py-0.5 text-xs focus:ring-1 focus:ring-amber-500 font-semibold"
+                                                  />
+                                                </td>
+                                                <td className="py-1 px-3">
+                                                  <div className="relative">
+                                                    <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[9px] text-slate-400 font-mono">$</span>
+                                                    <input
+                                                      type="number"
+                                                      min="0"
+                                                      step="0.0001"
+                                                      value={v.rate === 0 ? "" : v.rate}
+                                                      onChange={(e) => {
+                                                        const val = Math.max(0, parseFloat(e.target.value) || 0);
+                                                        updateOutboundVirtualValue(row.id, v.id, "rate", val);
+                                                      }}
+                                                      className="w-full font-mono text-right bg-slate-50/30 hover:bg-white focus:bg-white text-slate-800 border-none rounded pl-4 pr-1.5 py-0.5 text-xs focus:ring-1 focus:ring-amber-500"
+                                                    />
+                                                  </div>
+                                                </td>
+                                                <td className="py-1 px-3 text-right font-mono text-amber-950 font-bold">
+                                                  ${vRev.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                                </td>
+                                              </tr>
+                                            );
+                                          })}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
                         );
                       })
                     )}
@@ -2167,7 +2639,7 @@ export default function App() {
                   type="submit"
                   className="px-5.5 py-2.5 text-xs font-bold text-white bg-indigo-650 hover:bg-indigo-700 rounded-xl shadow-xs transition-all hover:scale-[1.015] active:scale-[0.985] flex items-center gap-1.5 cursor-pointer"
                 >
-                  <Save size={14} /> SAVE and REFLECT
+                  <Save size={14} /> (SAVE and REFLECT)
                 </button>
               </div>
 
